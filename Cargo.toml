@@ -1,0 +1,62 @@
+[package]
+name = "yubikey-signer"
+version = "0.1.0"
+edition = "2021"
+description = "Self-contained YubiKey code signing utility"
+authors = ["Daniel Gehriger <gehriger@linkcad.com>"]
+license = "GPL"
+
+[lib]
+name = "yubikey_signer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "yubikey-signer"
+path = "src/bin/main.rs"
+
+[dependencies]
+# YubiKey PIV integration
+yubikey = "0.8"
+
+# Cryptographic operations  
+rsa = "0.9"
+sha2 = "0.10"
+x509-cert = "0.2"
+der = "0.7"
+pem = "3.0"
+pkcs1 = "0.7"
+pkcs7 = "0.4.1"
+spki = "0.7"
+
+# PE file manipulation
+goblin = "0.10.0"
+
+# HTTP client for timestamping
+reqwest = { version = "0.12.22", features = ["rustls-tls", "json"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+# Command line interface
+clap = { version = "4.0", features = ["derive"] }
+rpassword = "7.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0.12"
+miette = { version = "7.0", features = ["fancy"] }
+
+# File operations
+tempfile = "3.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11.8"
+
+[dev-dependencies]
+# Testing
+hex = "0.4"
+mockall = "0.13.1"
+tokio-test = "0.4"
