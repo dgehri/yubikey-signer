@@ -36,18 +36,18 @@ pub fn parse_pe(data: &[u8]) -> SigningResult<PeInfo> {
     // Parse the PE file using goblin
     let pe = PE::parse(data).map_err(|e| {
         // Provide more specific error messages based on goblin error
-        let error_msg = format!("{}", e);
+        let error_msg = format!("{e}");
         if error_msg.contains("dos header") {
             SigningError::PeParsingError(
-                format!("Invalid DOS header: {}", error_msg)
+                format!("Invalid DOS header: {error_msg}")
             )
         } else if error_msg.contains("pe header") || error_msg.contains("PE") {
             SigningError::PeParsingError(
-                format!("Invalid PE header: {}", error_msg)
+                format!("Invalid PE header: {error_msg}")
             )
         } else if error_msg.contains("section") {
             SigningError::PeParsingError(
-                format!("Invalid PE sections: {}", error_msg)
+                format!("Invalid PE sections: {error_msg}")
             )
         } else if error_msg.contains("too big") {
             SigningError::PeParsingError(
@@ -55,7 +55,7 @@ pub fn parse_pe(data: &[u8]) -> SigningResult<PeInfo> {
             )
         } else {
             SigningError::PeParsingError(
-                format!("Failed to parse PE file: {}", error_msg)
+                format!("Failed to parse PE file: {error_msg}")
             )
         }
     })?;
@@ -143,7 +143,7 @@ pub fn calculate_pe_checksum(data: &[u8], checksum_offset: usize) -> u32 {
     // Finalize checksum
     checksum = (checksum & 0xffff) + (checksum >> 16);
     checksum = checksum + (checksum >> 16);
-    checksum = checksum & 0xffff;
+    checksum &= 0xffff;
     
     (checksum + data.len() as u64) as u32
 }

@@ -15,9 +15,9 @@ fn test_minimal_pe_file() {
             println!("Parsed minimal PE: checksum offset {}", pe_info.checksum_offset);
         }
         Err(e) => {
-            println!("Expected failure parsing minimal PE: {}", e);
+            println!("Expected failure parsing minimal PE: {e}");
             // Should be a parsing error, not a panic
-            assert!(format!("{}", e).contains("PE") || format!("{}", e).contains("parse"));
+            assert!(format!("{e}").contains("PE") || format!("{e}").contains("parse"));
         }
     }
 }
@@ -33,16 +33,15 @@ fn test_corrupted_dos_header() {
     ];
     
     for (name, data) in test_cases {
-        println!("Testing corrupted DOS header: {}", name);
+        println!("Testing corrupted DOS header: {name}");
         
         let result = parse_pe(&data);
-        assert!(result.is_err(), "Should fail parsing corrupted PE: {}", name);
+        assert!(result.is_err(), "Should fail parsing corrupted PE: {name}");
         
         let error_msg = format!("{}", result.unwrap_err());
         assert!(
             error_msg.contains("DOS") || error_msg.contains("MZ") || error_msg.contains("header") || error_msg.contains("parse"),
-            "Error should mention DOS/MZ header or parsing: {}",
-            error_msg
+            "Error should mention DOS/MZ header or parsing: {error_msg}"
         );
     }
 }
@@ -57,10 +56,10 @@ fn test_corrupted_pe_header() {
     ];
     
     for (name, data) in test_cases {
-        println!("Testing corrupted PE header: {}", name);
+        println!("Testing corrupted PE header: {name}");
         
         let result = parse_pe(&data);
-        assert!(result.is_err(), "Should fail parsing corrupted PE: {}", name);
+        assert!(result.is_err(), "Should fail parsing corrupted PE: {name}");
     }
 }
 
@@ -74,13 +73,13 @@ fn test_malformed_sections() {
     ];
     
     for (name, data) in test_cases {
-        println!("Testing malformed sections: {}", name);
+        println!("Testing malformed sections: {name}");
         
         let result = parse_pe(&data);
         // Should handle gracefully
         match result {
             Ok(_) => println!("  Parsed (surprising)"),
-            Err(e) => println!("  Failed as expected: {}", e),
+            Err(e) => println!("  Failed as expected: {e}"),
         }
     }
 }
@@ -101,7 +100,7 @@ fn test_existing_signatures() {
             }
         }
         Err(e) => {
-            println!("Failed to parse PE with signature: {}", e);
+            println!("Failed to parse PE with signature: {e}");
         }
     }
 }
@@ -121,7 +120,7 @@ fn test_edge_case_file_sizes() {
         
         let result = parse_pe(&data);
         // All should fail gracefully
-        assert!(result.is_err(), "Should fail for edge case: {}", name);
+        assert!(result.is_err(), "Should fail for edge case: {name}");
     }
 }
 
@@ -155,17 +154,16 @@ fn test_non_pe_files_with_pe_extensions() {
     ];
     
     for (name, data) in test_cases {
-        println!("Testing non-PE file: {}", name);
+        println!("Testing non-PE file: {name}");
         
         let result = parse_pe(&data);
-        assert!(result.is_err(), "Should reject non-PE file: {}", name);
+        assert!(result.is_err(), "Should reject non-PE file: {name}");
         
         let error_msg = format!("{}", result.unwrap_err());
         // Should clearly indicate it's not a valid PE file
         assert!(
             error_msg.contains("PE") || error_msg.contains("format") || error_msg.contains("invalid") || error_msg.contains("parse"),
-            "Error should indicate invalid PE format: {}",
-            error_msg
+            "Error should indicate invalid PE format: {error_msg}"
         );
     }
 }
@@ -395,7 +393,7 @@ fn create_fake_elf_file() -> Vec<u8> {
     let mut elf = Vec::new();
     elf.extend_from_slice(&[0x7F, b'E', b'L', b'F']); // ELF magic
     elf.extend_from_slice(&[0x01, 0x01, 0x01, 0x00]); // Class, data, version, ABI
-    elf.extend_from_slice(&vec![0x00; 8]); // Padding
+    elf.extend_from_slice(&[0x00; 8]); // Padding
     elf.extend_from_slice(&[0x02, 0x00]); // e_type
     elf.extend_from_slice(&[0x03, 0x00]); // e_machine (i386)
     elf

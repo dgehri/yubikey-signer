@@ -76,7 +76,7 @@ impl AuthenticodeSigner {
         // For now, this is a placeholder implementation
 
         log::warn!("Signature verification not fully implemented yet");
-        Ok(signature_data.len() > 0 && pe_data.len() > 0)
+        Ok(!signature_data.is_empty() && !pe_data.is_empty())
     }
 
     /// Create hasher for the specified algorithm

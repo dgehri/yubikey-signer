@@ -3,9 +3,8 @@
 //! Tests for command-line interface, configuration handling, and integration scenarios
 
 use std::env;
-use std::process::Command;
-use tempfile::{NamedTempFile, TempDir};
-use yubikey_signer::{HashAlgorithm, SigningConfig, SigningError};
+use tempfile::TempDir;
+use yubikey_signer::{HashAlgorithm, SigningConfig};
 use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
 use std::io::Write;
 
@@ -28,13 +27,13 @@ mod cli_validation_tests {
         for (input, expected) in valid_slots {
             match u8::from_str_radix(input, 16) {
                 Ok(parsed) => {
-                    assert_eq!(parsed, expected, "Slot '{}' should parse to 0x{:02x}", input, expected);
+                    assert_eq!(parsed, expected, "Slot '{input}' should parse to 0x{expected:02x}");
                     
                     // Verify it's in valid PIV range
-                    assert!(parsed >= 0x9a && parsed <= 0x9e, "Slot 0x{:02x} should be valid PIV slot", parsed);
+                    assert!((0x9a..=0x9e).contains(&parsed), "Slot 0x{parsed:02x} should be valid PIV slot");
                 }
                 Err(e) => {
-                    panic!("Slot '{}' should parse: {}", input, e);
+                    panic!("Slot '{input}' should parse: {e}");
                 }
             }
         }
@@ -46,9 +45,8 @@ mod cli_validation_tests {
             if let Ok(parsed) = result {
                 // Even if it parses as hex, it should be outside PIV range
                 assert!(
-                    parsed < 0x9a || parsed > 0x9e,
-                    "Invalid slot '{}' parsed to valid PIV slot 0x{:02x}",
-                    input, parsed
+                    !(0x9a..=0x9e).contains(&parsed),
+                    "Invalid slot '{input}' parsed to valid PIV slot 0x{parsed:02x}"
                 );
             }
             // Otherwise, parse failure is expected
@@ -78,8 +76,7 @@ mod cli_validation_tests {
             let is_valid = validate_piv_pin(pin);
             assert_eq!(
                 is_valid, expected_valid,
-                "PIN '{}' validation failed: {} (expected: {})",
-                pin, reason, expected_valid
+                "PIN '{pin}' validation failed: {reason} (expected: {expected_valid})"
             );
         }
     }
@@ -101,8 +98,7 @@ mod cli_validation_tests {
             let parsed = parse_hash_algorithm(input);
             assert_eq!(
                 parsed, Some(expected),
-                "Hash algorithm '{}' should parse to {:?}",
-                input, expected
+                "Hash algorithm '{input}' should parse to {expected:?}"
             );
         }
         
@@ -112,8 +108,7 @@ mod cli_validation_tests {
             let parsed = parse_hash_algorithm(input);
             assert_eq!(
                 parsed, None,
-                "Invalid hash algorithm '{}' should not parse",
-                input
+                "Invalid hash algorithm '{input}' should not parse"
             );
         }
     }
@@ -133,8 +128,7 @@ mod cli_validation_tests {
         for url in valid_urls {
             assert!(
                 is_valid_timestamp_url(url),
-                "URL '{}' should be considered valid",
-                url
+                "URL '{url}' should be considered valid"
             );
         }
         
@@ -152,11 +146,11 @@ mod cli_validation_tests {
         ];
         
         for url in questionable_urls {
-            println!("Testing questionable URL: '{}'", url);
+            println!("Testing questionable URL: '{url}'");
             // These should be rejected or flagged as suspicious
             let is_valid = is_valid_timestamp_url(url);
             if is_valid {
-                println!("  WARNING: Questionable URL accepted: '{}'", url);
+                println!("  WARNING: Questionable URL accepted: '{url}'");
             }
         }
     }
@@ -281,7 +275,7 @@ mod file_handling_tests {
         ];
         
         for path in problematic_paths {
-            println!("Testing problematic path: '{}'", path);
+            println!("Testing problematic path: '{path}'");
             
             // These should all fail gracefully when used as input files
             let path_obj = std::path::Path::new(path);
@@ -290,9 +284,9 @@ mod file_handling_tests {
             let exists = path_obj.exists();
             if path.is_empty() {
                 // Empty path has undefined behavior, but shouldn't crash
-                println!("  Empty path exists: {}", exists);
+                println!("  Empty path exists: {exists}");
             } else {
-                println!("  Path '{}' exists: {}", path, exists);
+                println!("  Path '{path}' exists: {exists}");
             }
             
             // Test metadata access
@@ -301,7 +295,7 @@ mod file_handling_tests {
                     println!("  Path '{}' metadata: {} bytes", path, metadata.len());
                 }
                 Err(e) => {
-                    println!("  Path '{}' metadata error: {}", path, e);
+                    println!("  Path '{path}' metadata error: {e}");
                     // This is expected for most test paths
                 }
             }
@@ -338,7 +332,7 @@ mod file_handling_tests {
         let long_result = std::fs::write(&long_file, b"Long filename content");
         match long_result {
             Ok(_) => println!("Long filename worked: {} chars", long_name.len()),
-            Err(e) => println!("Long filename failed (expected): {}", e),
+            Err(e) => println!("Long filename failed (expected): {e}"),
         }
         
         // Test with special characters in filename
@@ -347,8 +341,8 @@ mod file_handling_tests {
             let special_file = temp_dir.path().join(special_name);
             let special_result = std::fs::write(&special_file, b"Special char content");
             match special_result {
-                Ok(_) => println!("Special char filename '{}' worked", special_name),
-                Err(e) => println!("Special char filename '{}' failed: {}", special_name, e),
+                Ok(_) => println!("Special char filename '{special_name}' worked"),
+                Err(e) => println!("Special char filename '{special_name}' failed: {e}"),
             }
         }
     }
@@ -451,7 +445,7 @@ mod error_recovery_tests {
         if output_file.exists() {
             println!("WARNING: Output file exists after failure - check cleanup");
             let output_size = std::fs::metadata(&output_file).unwrap().len();
-            println!("Partial output file size: {} bytes", output_size);
+            println!("Partial output file size: {output_size} bytes");
         }
         
         // Input should be unchanged
@@ -462,7 +456,7 @@ mod error_recovery_tests {
         // Create minimal PE file for testing
         let mut pe = Vec::new();
         pe.extend_from_slice(b"MZ");
-        pe.extend_from_slice(&vec![0x00; 62]);
+        pe.extend_from_slice(&[0x00; 62]);
         pe.extend_from_slice(&[0x80, 0x00, 0x00, 0x00]); // e_lfanew
         
         // Pad to PE header
@@ -471,7 +465,7 @@ mod error_recovery_tests {
         }
         
         pe.extend_from_slice(b"PE\x00\x00");
-        pe.extend_from_slice(&vec![0x00; 100]); // Rest of PE structure
+        pe.extend_from_slice(&[0x00; 100]); // Rest of PE structure
         
         pe
     }
@@ -494,24 +488,24 @@ mod windows_specific_tests {
         ];
         
         for path in windows_paths {
-            println!("Testing Windows path: {}", path);
+            println!("Testing Windows path: {path}");
             
             let path_obj = std::path::Path::new(path);
             
             // Test path parsing
             if let Some(parent) = path_obj.parent() {
-                println!("  Parent: {:?}", parent);
+                println!("  Parent: {parent:?}");
             }
             
             if let Some(filename) = path_obj.file_name() {
-                println!("  Filename: {:?}", filename);
+                println!("  Filename: {filename:?}");
             }
             
             // Test path normalization
             let canonical = path_obj.canonicalize();
             match canonical {
-                Ok(normalized) => println!("  Canonical: {:?}", normalized),
-                Err(e) => println!("  Canonicalization failed: {}", e),
+                Ok(normalized) => println!("  Canonical: {normalized:?}"),
+                Err(e) => println!("  Canonicalization failed: {e}"),
             }
         }
     }
@@ -534,7 +528,7 @@ mod windows_specific_tests {
         {
             use std::os::windows::fs::MetadataExt;
             let attrs = metadata.file_attributes();
-            println!("  Windows attributes: 0x{:08x}", attrs);
+            println!("  Windows attributes: 0x{attrs:08x}");
         }
     }
 }
@@ -593,5 +587,5 @@ mod test_helpers {
     // This would normally be in Cargo.toml:
     // [dev-dependencies]
     // tokio-test = "0.4"
-    pub use tokio_test;
+    
 }

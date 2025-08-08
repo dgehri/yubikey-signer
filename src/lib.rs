@@ -75,7 +75,7 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
 
     // Read input file
     let file_data = std::fs::read(&input_path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {}", e)))?;
+        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
 
     // Connect to YubiKey and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect()?;
@@ -98,7 +98,7 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
 
     // Get timestamp if requested
     let timestamp_token = if let Some(ts_url) = &config.timestamp_url {
-        log::info!("Requesting timestamp from: {}", ts_url);
+        log::info!("Requesting timestamp from: {ts_url}");
         let client = TimestampClient::new(ts_url);
         Some(client.get_timestamp(&pe_hash).await?)
     } else {
@@ -115,7 +115,7 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
 
     // Write signed file
     std::fs::write(&output_path, signed_data)
-        .map_err(|e| SigningError::IoError(format!("Failed to write output file: {}", e)))?;
+        .map_err(|e| SigningError::IoError(format!("Failed to write output file: {e}")))?;
 
     log::info!("Successfully signed PE file: {:?}", output_path.as_ref());
     Ok(())
@@ -124,7 +124,7 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
 /// Verify a signed PE file
 pub fn verify_pe_file<P: AsRef<Path>>(path: P) -> SigningResult<bool> {
     let file_data = std::fs::read(&path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read file: {}", e)))?;
+        .map_err(|e| SigningError::IoError(format!("Failed to read file: {e}")))?;
 
     // Parse PE and extract signature
     let pe_info = pe::parse_pe(&file_data)?;

@@ -48,7 +48,7 @@ async fn test_sign_pe_file_with_invalid_input() {
     // Should be an IO error for nonexistent file
     match result.unwrap_err() {
         SigningError::IoError(_) => {}, // Expected
-        other => panic!("Expected IoError, got: {:?}", other),
+        other => panic!("Expected IoError, got: {other:?}"),
     }
 }
 
@@ -75,7 +75,7 @@ async fn test_sign_pe_file_with_invalid_pe() {
     // Should be either a PE error or YubiKey error (depending on how far it gets)
     match result.unwrap_err() {
         SigningError::PeParsingError(_) | SigningError::YubiKeyError(_) => {}, // Expected
-        other => panic!("Expected PeParsingError or YubiKeyError, got: {:?}", other),
+        other => panic!("Expected PeParsingError or YubiKeyError, got: {other:?}"),
     }
 }
 
@@ -110,7 +110,7 @@ mod integration_tests {
         
         let config = SigningConfig {
             piv_slot: PivSlot::new(0x9c).unwrap(),
-            pin: PivPin::new(&std::env::var("YUBIKEY_PIN").unwrap_or_else(|_| "123456".to_string())).unwrap(),
+            pin: PivPin::new(std::env::var("YUBIKEY_PIN").unwrap_or_else(|_| "123456".to_string())).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
             embed_certificate: true,
@@ -138,10 +138,10 @@ mod integration_tests {
         match result {
             Ok(token) => {
                 println!("Received timestamp token: {} bytes", token.len());
-                assert!(token.len() > 0);
+                assert!(!token.is_empty());
             }
             Err(e) => {
-                println!("Timestamp failed (may be expected in CI): {}", e);
+                println!("Timestamp failed (may be expected in CI): {e}");
                 // Don't fail the test - network may not be available
             }
         }

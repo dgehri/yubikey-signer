@@ -27,7 +27,7 @@ async fn debug_digest_info() {
     let digest_info = create_digest_info(&hash, yubikey_signer::HashAlgorithm::Sha256).unwrap();
     
     println!("DigestInfo size: {} bytes", digest_info.len());
-    println!("DigestInfo: {:02x?}", digest_info);
+    println!("DigestInfo: {digest_info:02x?}");
     
     // DigestInfo should be larger than the raw hash
     assert!(digest_info.len() > hash.len());

@@ -44,10 +44,10 @@ async fn test_real_yubikey_connection_and_certificate_retrieval() {
         }
         Err(e) => {
             // For TDD, we expect this to fail with various errors as we build up functionality
-            println!("Expected failure during TDD: {}", e);
+            println!("Expected failure during TDD: {e}");
 
             // Verify it's failing for expected reasons (not connectivity issues)
-            let error_msg = format!("{}", e);
+            let error_msg = format!("{e}");
             assert!(
                 error_msg.contains("PE file parsing")
                     || error_msg.contains("not a valid PE")
@@ -55,8 +55,7 @@ async fn test_real_yubikey_connection_and_certificate_retrieval() {
                     || error_msg.contains("timestamp")
                     || error_msg.contains("invalid")
                     || error_msg.contains("placeholder"),
-                "Should fail with implementation error, got: {}",
-                error_msg
+                "Should fail with implementation error, got: {error_msg}"
             );
         }
     }
@@ -92,7 +91,7 @@ async fn test_yubikey_certificate_matches_file() {
         }
         Err(e) => {
             // No certificate in 0x9a, try other slots
-            println!("No certificate in slot 0x9a: {}", e);
+            println!("No certificate in slot 0x9a: {e}");
 
             // Try other common slots
             let slots_to_try = [0x9c, 0x9d, 0x9e]; // Digital Signature, Key Management, Card Authentication
@@ -103,8 +102,7 @@ async fn test_yubikey_certificate_matches_file() {
                 match ops.get_certificate(slot) {
                     Ok(cert) => {
                         println!(
-                            "SUCCESS: Retrieved certificate from YubiKey slot 0x{:02x}",
-                            slot_id
+                            "SUCCESS: Retrieved certificate from YubiKey slot 0x{slot_id:02x}"
                         );
                         println!("Certificate subject: {:?}", cert.tbs_certificate.subject);
                         assert!(!cert.tbs_certificate.serial_number.as_bytes().is_empty());
@@ -112,7 +110,7 @@ async fn test_yubikey_certificate_matches_file() {
                         break;
                     }
                     Err(e) => {
-                        println!("No certificate in slot 0x{:02x}: {}", slot_id, e);
+                        println!("No certificate in slot 0x{slot_id:02x}: {e}");
                     }
                 }
             }
@@ -120,7 +118,7 @@ async fn test_yubikey_certificate_matches_file() {
             if !found_cert {
                 // Expected TDD failure if no certificates are present
                 println!("Expected TDD failure: No certificates found in any PIV slot");
-                let error_msg = format!("{}", e);
+                let error_msg = format!("{e}");
                 assert!(
                     error_msg.contains("invalid object")
                         || error_msg.contains("not found")
@@ -145,18 +143,17 @@ fn test_yubikey_basic_connection() {
 
             // Try to get serial number
             if let Ok(serial) = ops.get_serial() {
-                println!("YubiKey Serial: {}", serial);
+                println!("YubiKey Serial: {serial}");
             }
 
             // Try to get version
             if let Ok(version) = ops.get_version() {
-                println!("YubiKey Version: {}", version);
+                println!("YubiKey Version: {version}");
             }
         }
         Err(e) => {
             panic!(
-                "Failed to connect to YubiKey: {}. Is YubiKey plugged in?",
-                e
+                "Failed to connect to YubiKey: {e}. Is YubiKey plugged in?"
             );
         }
     }

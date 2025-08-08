@@ -34,7 +34,7 @@ impl TimestampClient {
             .body(ts_request)
             .send()
             .await
-            .map_err(|e| SigningError::NetworkError(format!("Failed to send timestamp request: {}", e)))?;
+            .map_err(|e| SigningError::NetworkError(format!("Failed to send timestamp request: {e}")))?;
 
         if !response.status().is_success() {
             return Err(SigningError::TimestampError(format!(
@@ -45,7 +45,7 @@ impl TimestampClient {
         let response_bytes = response
             .bytes()
             .await
-            .map_err(|e| SigningError::NetworkError(format!("Failed to read timestamp response: {}", e)))?;
+            .map_err(|e| SigningError::NetworkError(format!("Failed to read timestamp response: {e}")))?;
 
         // For now, just return the raw response - full parsing would be implemented here
         log::info!("Successfully received timestamp token ({} bytes)", response_bytes.len());
@@ -92,7 +92,7 @@ pub fn verify_timestamp_token(token: &[u8], original_hash: &[u8]) -> SigningResu
     log::debug!("Original hash length: {} bytes", original_hash.len());
     
     // Placeholder implementation
-    Ok(token.len() > 0 && original_hash.len() > 0)
+    Ok(!token.is_empty() && !original_hash.is_empty())
 }
 
 #[cfg(test)]

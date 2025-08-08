@@ -4,11 +4,10 @@
 //! robust production behavior.
 
 use std::env;
-use std::fs;
 use std::path::Path;
-use tempfile::{NamedTempFile, TempDir};
-use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
-use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, SigningError, YubiKeyOperations};
+use tempfile::NamedTempFile;
+use yubikey_signer::types::{PivPin, PivSlot};
+use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, YubiKeyOperations};
 
 /// Test suite for input validation edge cases
 mod input_validation_tests {
@@ -130,7 +129,7 @@ mod yubikey_hardware_tests {
         match result {
             Ok(_) => println!("YubiKey connected"),
             Err(e) => {
-                let error_msg = format!("{}", e);
+                let error_msg = format!("{e}");
                 assert!(error_msg.contains("YubiKey") || error_msg.contains("connect"));
             }
         }
@@ -139,7 +138,7 @@ mod yubikey_hardware_tests {
     #[test]
     #[ignore = "Requires YubiKey hardware"]
     fn test_invalid_pin() {
-        let mut ops = YubiKeyOperations::connect().expect("YubiKey required");
+        let ops = YubiKeyOperations::connect().expect("YubiKey required");
 
         let invalid_pins = vec![
             "",          // empty
@@ -153,7 +152,7 @@ mod yubikey_hardware_tests {
         for pin_str in invalid_pins {
             // Test that PivPin creation fails for invalid formats
             let pin_result = PivPin::new(pin_str);
-            assert!(pin_result.is_err(), "PIN '{}' should be invalid", pin_str);
+            assert!(pin_result.is_err(), "PIN '{pin_str}' should be invalid");
         }
     }
 
@@ -219,9 +218,9 @@ mod yubikey_hardware_tests {
             let slot = PivSlot::new(slot_num).expect("Valid slot");
             let result = ops.get_certificate(slot);
             match result {
-                Ok(_) => println!("Slot 0x{:02x} has certificate", slot_num),
+                Ok(_) => println!("Slot 0x{slot_num:02x} has certificate"),
                 Err(e) => {
-                    let error_msg = format!("{}", e);
+                    let error_msg = format!("{e}");
                     // Should fail gracefully for empty slots
                     assert!(error_msg.contains("certificate") || error_msg.contains("slot"));
                 }
@@ -285,7 +284,7 @@ mod signature_format_tests {
                     assert!(!signature.is_empty());
                 }
                 Err(e) => {
-                    println!("  Failed: {}", e);
+                    println!("  Failed: {e}");
                     // Document which sizes fail for different algorithms
                 }
             }
@@ -317,7 +316,7 @@ mod signature_format_tests {
                     println!("  {} works: {} byte signature", name, signature.len());
                 }
                 Err(e) => {
-                    println!("  {} failed: {}", name, e);
+                    println!("  {name} failed: {e}");
                 }
             }
         }
@@ -344,12 +343,12 @@ mod signature_format_tests {
             ("Sequential", (0..32).map(|i| i as u8).collect()),
             (
                 "Random pattern",
-                vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0].repeat(4),
+                [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0].repeat(4),
             ),
         ];
 
         for (name, hash) in test_cases {
-            println!("Testing malformed hash: {}", name);
+            println!("Testing malformed hash: {name}");
 
             let slot = PivSlot::new(0x9a).expect("Valid slot");
             let result = ops.sign_hash(&hash, slot);
@@ -359,7 +358,7 @@ mod signature_format_tests {
                     assert!(!signature.is_empty());
                 }
                 Err(e) => {
-                    println!("  Failed (expected): {}", e);
+                    println!("  Failed (expected): {e}");
                 }
             }
         }
@@ -368,7 +367,7 @@ mod signature_format_tests {
 
 /// Test suite for CLI argument edge cases
 mod cli_argument_tests {
-    use super::*;
+    
 
     #[test]
     fn test_slot_parsing() {
@@ -378,12 +377,11 @@ mod cli_argument_tests {
 
         for slot_str in valid_slots {
             let parsed = u8::from_str_radix(slot_str, 16);
-            assert!(parsed.is_ok(), "Slot '{}' should parse", slot_str);
+            assert!(parsed.is_ok(), "Slot '{slot_str}' should parse");
             let slot_value = parsed.unwrap();
             assert!(
-                slot_value >= 0x9a && slot_value <= 0x9e,
-                "Slot 0x{:02x} should be in valid range",
-                slot_value
+                (0x9a..=0x9e).contains(&slot_value),
+                "Slot 0x{slot_value:02x} should be in valid range"
             );
         }
 
@@ -393,9 +391,8 @@ mod cli_argument_tests {
                 let slot_value = parsed.unwrap();
                 // Even if it parses, it should be outside valid PIV range
                 assert!(
-                    slot_value < 0x9a || slot_value > 0x9e,
-                    "Slot '{}' should be invalid",
-                    slot_str
+                    !(0x9a..=0x9e).contains(&slot_value),
+                    "Slot '{slot_str}' should be invalid"
                 );
             }
         }
@@ -407,11 +404,11 @@ mod cli_argument_tests {
         let invalid_pins = vec!["", "1", "12345", "123456789", "abcdef", "12345a"];
 
         for pin in valid_pins {
-            assert!(is_valid_pin(pin), "PIN '{}' should be valid", pin);
+            assert!(is_valid_pin(pin), "PIN '{pin}' should be valid");
         }
 
         for pin in invalid_pins {
-            assert!(!is_valid_pin(pin), "PIN '{}' should be invalid", pin);
+            assert!(!is_valid_pin(pin), "PIN '{pin}' should be invalid");
         }
     }
 
@@ -439,8 +436,7 @@ mod cli_argument_tests {
         for url in valid_urls {
             assert!(
                 is_reasonable_timestamp_url(url),
-                "URL '{}' should be reasonable",
-                url
+                "URL '{url}' should be reasonable"
             );
         }
 
@@ -541,7 +537,7 @@ mod resource_tests {
             match result {
                 Ok(_) => {
                     // If we actually connect, that's fine too
-                    println!("Connected on iteration {}", i);
+                    println!("Connected on iteration {i}");
                 }
                 Err(_) => {
                     // Expected without hardware
@@ -555,7 +551,7 @@ mod resource_tests {
     #[test]
     fn test_concurrent_operations() {
         // Test thread safety
-        use std::sync::Arc;
+        
         use std::thread;
 
         let handles: Vec<_> = (0..10)

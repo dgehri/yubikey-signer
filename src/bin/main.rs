@@ -5,7 +5,6 @@
 use clap::{Parser, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 use std::path::PathBuf;
-use tokio;
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, SigningError};
 use yubikey_signer::{PivPin, PivSlot, TimestampUrl};
 
@@ -231,7 +230,7 @@ async fn main() -> Result<()> {
     if let Some(extension) = cli.input_file.extension() {
         let ext_str = extension.to_string_lossy().to_lowercase();
         if !["exe", "dll", "sys", "scr", "ocx"].contains(&ext_str.as_str()) {
-            println!("⚠️  Warning: File extension '{}' is not a typical PE file type", ext_str);
+            println!("⚠️  Warning: File extension '{ext_str}' is not a typical PE file type");
             println!("   Common PE types: .exe, .dll, .sys, .scr, .ocx");
             println!("   Continuing anyway...");
             println!();
@@ -336,15 +335,15 @@ async fn main() -> Result<()> {
     println!("🔑 PIV slot:         {} ({})", slot.description(), get_slot_description(slot.as_u8()));
     println!("🔒 Hash algorithm:   {:?}", config.hash_algorithm);
     if let Some(ref ts_url) = config.timestamp_url {
-        println!("⏰ Timestamp URL:    {}", ts_url);
+        println!("⏰ Timestamp URL:    {ts_url}");
     } else {
         println!("⏰ Timestamp URL:    None (signature will not include timestamp)");
     }
     if let Some(ref desc) = cli.description {
-        println!("📝 Description:      {}", desc);
+        println!("📝 Description:      {desc}");
     }
     if let Some(ref url_val) = cli.url {
-        println!("🌐 Product URL:      {}", url_val);
+        println!("🌐 Product URL:      {url_val}");
     }
     
     // Show file size info
@@ -425,15 +424,15 @@ fn parse_piv_slot(slot_str: &str) -> Result<u8> {
     let slot = if slot_str.starts_with("0x") || slot_str.starts_with("0X") {
         // Hex format
         u8::from_str_radix(&slot_str[2..], 16).into_diagnostic()
-            .with_context(|| format!("Invalid hex format in slot '{}'", slot_str))?
+            .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
     } else if slot_str.len() == 2 && slot_str.chars().all(|c| c.is_ascii_hexdigit()) {
         // Hex format without prefix
         u8::from_str_radix(slot_str, 16).into_diagnostic()
-            .with_context(|| format!("Invalid hex format in slot '{}'", slot_str))?
+            .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
     } else {
         // Decimal format
         slot_str.parse::<u8>().into_diagnostic()
-            .with_context(|| format!("Invalid decimal format in slot '{}'", slot_str))?
+            .with_context(|| format!("Invalid decimal format in slot '{slot_str}'"))?
     };
 
     // Validate common PIV slots
@@ -441,8 +440,7 @@ fn parse_piv_slot(slot_str: &str) -> Result<u8> {
         0x9a | 0x9c | 0x9d | 0x9e => Ok(slot),
         _ => {
             log::warn!(
-                "Unusual PIV slot 0x{:02x} - common slots are 0x9a, 0x9c, 0x9d, 0x9e",
-                slot
+                "Unusual PIV slot 0x{slot:02x} - common slots are 0x9a, 0x9c, 0x9d, 0x9e"
             );
             
             // Provide a more helpful error for clearly invalid slots
@@ -490,7 +488,7 @@ async fn validate_signing_environment(config: &SigningConfig) -> Result<()> {
                 log::info!("✓ Timestamp server reachable");
             }
             Err(e) => {
-                log::warn!("Timestamp server test failed: {}", e);
+                log::warn!("Timestamp server test failed: {e}");
                 log::warn!("Signing will proceed without timestamp");
             }
         }

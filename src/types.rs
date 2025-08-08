@@ -29,7 +29,7 @@ impl TimestampUrl {
         // Must start with http:// or https://
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err(SigningError::ValidationError(
-                format!("Timestamp URL must start with http:// or https://, got: {}", url)
+                format!("Timestamp URL must start with http:// or https://, got: {url}")
             ));
         }
 
@@ -45,7 +45,7 @@ impl TimestampUrl {
         for pattern in &suspicious_patterns {
             if url.contains(pattern) {
                 return Err(SigningError::ValidationError(
-                    format!("Timestamp URL contains suspicious pattern '{}': {}", pattern, url)
+                    format!("Timestamp URL contains suspicious pattern '{pattern}': {url}")
                 ));
             }
         }
@@ -54,7 +54,7 @@ impl TimestampUrl {
         let without_protocol = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap();
         if !without_protocol.contains('.') {
             return Err(SigningError::ValidationError(
-                format!("Timestamp URL must contain a valid domain: {}", url)
+                format!("Timestamp URL must contain a valid domain: {url}")
             ));
         }
 
@@ -183,7 +183,7 @@ impl PivSlot {
         match slot {
             0x9a | 0x9c | 0x9d | 0x9e => Ok(()),
             _ => Err(SigningError::ValidationError(
-                format!("Invalid PIV slot 0x{:02x}. Valid slots: 0x9a (Auth), 0x9c (Sign), 0x9d (KeyMgmt), 0x9e (CardAuth)", slot)
+                format!("Invalid PIV slot 0x{slot:02x}. Valid slots: 0x9a (Auth), 0x9c (Sign), 0x9d (KeyMgmt), 0x9e (CardAuth)")
             ))
         }
     }
@@ -195,7 +195,7 @@ impl FromStr for PivSlot {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let slot = u8::from_str_radix(s, 16)
             .map_err(|_| SigningError::ValidationError(
-                format!("Invalid slot format '{}'. Expected hex value (9a, 9c, 9d, or 9e)", s)
+                format!("Invalid slot format '{s}'. Expected hex value (9a, 9c, 9d, or 9e)")
             ))?;
         Self::new(slot)
     }
@@ -325,7 +325,7 @@ impl SecurePath {
         for pattern in &suspicious_patterns {
             if path_str.contains(pattern) {
                 return Err(SigningError::ValidationError(
-                    format!("Path contains suspicious pattern '{}': {}", pattern, path_str)
+                    format!("Path contains suspicious pattern '{pattern}': {path_str}")
                 ));
             }
         }
@@ -361,7 +361,7 @@ mod tests {
         ];
 
         for url in valid_urls {
-            assert!(TimestampUrl::new(url).is_ok(), "URL should be valid: {}", url);
+            assert!(TimestampUrl::new(url).is_ok(), "URL should be valid: {url}");
         }
 
         // Invalid URLs
@@ -376,7 +376,7 @@ mod tests {
         ];
 
         for url in invalid_urls {
-            assert!(TimestampUrl::new(url).is_err(), "URL should be invalid: {}", url);
+            assert!(TimestampUrl::new(url).is_err(), "URL should be invalid: {url}");
         }
     }
 
@@ -385,13 +385,13 @@ mod tests {
         // Valid PINs
         let valid_pins = vec!["123456", "12345678", "abc123", "000000"];
         for pin in valid_pins {
-            assert!(PivPin::new(pin).is_ok(), "PIN should be valid: {}", pin);
+            assert!(PivPin::new(pin).is_ok(), "PIN should be valid: {pin}");
         }
 
         // Invalid PINs
         let invalid_pins = vec!["", "12345", "123456789", "12 34 56", "123-456"];
         for pin in invalid_pins {
-            assert!(PivPin::new(pin).is_err(), "PIN should be invalid: {}", pin);
+            assert!(PivPin::new(pin).is_err(), "PIN should be invalid: {pin}");
         }
     }
 
@@ -400,13 +400,13 @@ mod tests {
         // Valid slots
         let valid_slots = vec![0x9a, 0x9c, 0x9d, 0x9e];
         for slot in valid_slots {
-            assert!(PivSlot::new(slot).is_ok(), "Slot should be valid: 0x{:02x}", slot);
+            assert!(PivSlot::new(slot).is_ok(), "Slot should be valid: 0x{slot:02x}");
         }
 
         // Invalid slots
         let invalid_slots = vec![0x00, 0x99, 0xFF, 0x9b, 0x9f];
         for slot in invalid_slots {
-            assert!(PivSlot::new(slot).is_err(), "Slot should be invalid: 0x{:02x}", slot);
+            assert!(PivSlot::new(slot).is_err(), "Slot should be invalid: 0x{slot:02x}");
         }
     }
 
@@ -434,13 +434,13 @@ mod tests {
         // Valid paths
         let valid_paths = vec!["test.exe", "C:\\Program Files\\test.exe", "/usr/bin/test"];
         for path in valid_paths {
-            assert!(SecurePath::new(path).is_ok(), "Path should be valid: {}", path);
+            assert!(SecurePath::new(path).is_ok(), "Path should be valid: {path}");
         }
 
         // Invalid paths
         let invalid_paths = vec!["", "../../../etc/passwd", "javascript:alert('xss')"];
         for path in invalid_paths {
-            assert!(SecurePath::new(path).is_err(), "Path should be invalid: {}", path);
+            assert!(SecurePath::new(path).is_err(), "Path should be invalid: {path}");
         }
     }
 }

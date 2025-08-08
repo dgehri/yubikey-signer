@@ -49,35 +49,35 @@ async fn test_complete_signing_workflow() {
             println!("Output file created: {} bytes", output_metadata.len());
         }
         Err(e) => {
-            println!("Signing workflow failed: {}", e);
+            println!("Signing workflow failed: {e}");
 
             // Let's diagnose what specifically failed
             match &e {
                 yubikey_signer::SigningError::YubiKeyError(msg) => {
-                    println!("YubiKey issue: {}", msg);
+                    println!("YubiKey issue: {msg}");
                 }
                 yubikey_signer::SigningError::PeParsingError(msg) => {
-                    println!("PE parsing issue: {}", msg);
+                    println!("PE parsing issue: {msg}");
                 }
                 yubikey_signer::SigningError::CertificateError(msg) => {
-                    println!("Certificate issue: {}", msg);
+                    println!("Certificate issue: {msg}");
                 }
                 yubikey_signer::SigningError::NetworkError(msg) => {
-                    println!("Network issue: {}", msg);
+                    println!("Network issue: {msg}");
                 }
                 yubikey_signer::SigningError::IoError(msg) => {
-                    println!("IO issue: {}", msg);
+                    println!("IO issue: {msg}");
                 }
                 yubikey_signer::SigningError::SignatureError(msg) => {
-                    println!("Signature creation issue: {}", msg);
+                    println!("Signature creation issue: {msg}");
                 }
                 _ => {
-                    println!("Other error: {}", e);
+                    println!("Other error: {e}");
                 }
             }
 
             // For TDD, we expect this to fail initially, then we implement the missing parts
-            panic!("Expected signing to succeed, but got: {}", e);
+            panic!("Expected signing to succeed, but got: {e}");
         }
     }
 }
@@ -108,8 +108,8 @@ async fn test_signing_without_timestamp() {
             println!("Signing without timestamp succeeded");
         }
         Err(e) => {
-            println!("Signing without timestamp failed: {}", e);
-            panic!("Signing without timestamp should work: {}", e);
+            println!("Signing without timestamp failed: {e}");
+            panic!("Signing without timestamp should work: {e}");
         }
     }
 }

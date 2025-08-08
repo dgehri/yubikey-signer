@@ -31,7 +31,7 @@ impl YubiKeyOperations {
         log::info!("Connecting to YubiKey device");
 
         let yubikey = YubiKey::open()
-            .map_err(|e| SigningError::YubiKeyError(format!("Failed to open YubiKey: {}", e)))?;
+            .map_err(|e| SigningError::YubiKeyError(format!("Failed to open YubiKey: {e}")))?;
 
         log::info!("Connected to YubiKey");
         Ok(Self {
@@ -46,7 +46,7 @@ impl YubiKeyOperations {
 
         self.yubikey
             .verify_pin(pin.as_bytes())
-            .map_err(|e| SigningError::YubiKeyError(format!("PIN verification failed: {}", e)))?;
+            .map_err(|e| SigningError::YubiKeyError(format!("PIN verification failed: {e}")))?;
 
         self.authenticated = true;
         log::info!("Authenticated with YubiKey");
@@ -61,7 +61,7 @@ impl YubiKeyOperations {
             ));
         }
 
-        log::info!("Retrieving certificate from PIV slot {}", slot);
+        log::info!("Retrieving certificate from PIV slot {slot}");
 
         let slot_id = slot.as_slot_id();
 
@@ -71,10 +71,10 @@ impl YubiKeyOperations {
 
         // Parse the DER-encoded certificate
         let certificate = Certificate::from_der(&cert_der).map_err(|e| {
-            SigningError::CertificateError(format!("Failed to parse certificate: {}", e))
+            SigningError::CertificateError(format!("Failed to parse certificate: {e}"))
         })?;
 
-        log::info!("Successfully retrieved certificate from slot {}", slot);
+        log::info!("Successfully retrieved certificate from slot {slot}");
         Ok(certificate)
     }
 
@@ -90,7 +90,7 @@ impl YubiKeyOperations {
             ));
         }
 
-        log::info!("Signing hash with YubiKey PIV slot {}", slot);
+        log::info!("Signing hash with YubiKey PIV slot {slot}");
         log::debug!("Hash length: {} bytes", hash.len());
 
         let slot_id = slot.as_slot_id();
@@ -104,7 +104,7 @@ impl YubiKeyOperations {
 
     /// Internal method to fetch certificate DER data from YubiKey
     fn fetch_certificate_der(&mut self, slot_id: SlotId) -> SigningResult<Vec<u8>> {
-        log::info!("Fetching certificate DER from slot {:?}", slot_id);
+        log::info!("Fetching certificate DER from slot {slot_id:?}");
 
         // Use yubikey::Certificate::read to get the certificate
         match yubikey::Certificate::read(&mut self.yubikey, slot_id) {
@@ -120,23 +120,23 @@ impl YubiKeyOperations {
                         Ok(der_bytes)
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to encode certificate to DER: {}", e);
-                        log::error!("{}", error_msg);
+                        let error_msg = format!("Failed to encode certificate to DER: {e}");
+                        log::error!("{error_msg}");
                         Err(SigningError::YubiKeyError(error_msg))
                     }
                 }
             }
             Err(e) => {
                 let error_msg =
-                    format!("Failed to read certificate from slot {:?}: {}", slot_id, e);
-                log::error!("{}", error_msg);
+                    format!("Failed to read certificate from slot {slot_id:?}: {e}");
+                log::error!("{error_msg}");
                 Err(SigningError::YubiKeyError(error_msg))
             }
         }
     }
     /// Internal method to perform signing with YubiKey
     fn perform_signing(&mut self, slot_id: SlotId, hash: &[u8]) -> SigningResult<Vec<u8>> {
-        log::info!("Performing digital signature with slot {:?}", slot_id);
+        log::info!("Performing digital signature with slot {slot_id:?}");
         log::debug!("Hash to sign: {} bytes", hash.len());
 
         // Try different algorithms in order of preference
@@ -155,7 +155,7 @@ impl YubiKeyOperations {
                 return Ok(signature.to_vec());
             }
             Err(e) => {
-                log::debug!("ECC-P384 signing failed: {}", e);
+                log::debug!("ECC-P384 signing failed: {e}");
             }
         }
 
@@ -174,7 +174,7 @@ impl YubiKeyOperations {
                 return Ok(signature.to_vec());
             }
             Err(e) => {
-                log::debug!("ECC-P256 signing failed: {}", e);
+                log::debug!("ECC-P256 signing failed: {e}");
             }
         }
 
@@ -193,7 +193,7 @@ impl YubiKeyOperations {
                 return Ok(signature.to_vec());
             }
             Err(e) => {
-                log::debug!("RSA-2048 raw hash signing failed: {}", e);
+                log::debug!("RSA-2048 raw hash signing failed: {e}");
 
                 // If raw hash fails, try with DigestInfo structure
                 let hash_algorithm = match hash.len() {
@@ -202,7 +202,7 @@ impl YubiKeyOperations {
                     64 => crate::HashAlgorithm::Sha512,
                     _ => {
                         let error_msg = format!("Unsupported hash length: {} bytes", hash.len());
-                        log::error!("{}", error_msg);
+                        log::error!("{error_msg}");
                         return Err(SigningError::YubiKeyError(error_msg));
                     }
                 };
@@ -226,7 +226,7 @@ impl YubiKeyOperations {
                         return Ok(signature.to_vec());
                     }
                     Err(e2) => {
-                        log::debug!("RSA-2048 DigestInfo signing failed: {}", e2);
+                        log::debug!("RSA-2048 DigestInfo signing failed: {e2}");
                     }
                 }
             }
@@ -234,10 +234,9 @@ impl YubiKeyOperations {
 
         // If all algorithms fail, return error
         let error_msg = format!(
-            "Failed to sign with slot {:?}: no supported algorithm worked",
-            slot_id
+            "Failed to sign with slot {slot_id:?}: no supported algorithm worked"
         );
-        log::error!("{}", error_msg);
+        log::error!("{error_msg}");
         Err(SigningError::YubiKeyError(error_msg))
     }
     /// Get YubiKey serial number
@@ -321,7 +320,7 @@ mod tests {
     fn test_error_handling() {
         // Test that our error types can be created and displayed
         let error = SigningError::YubiKeyError("Test error".to_string());
-        let error_string = format!("{}", error);
+        let error_string = format!("{error}");
         assert!(error_string.contains("Test error"));
     }
 }

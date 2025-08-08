@@ -26,7 +26,7 @@ fn test_yubikey_raw_signing() {
     let test_data = vec![0x01; 32]; // 32 bytes of test data
     
     for (algorithm, name) in algorithms {
-        println!("Testing algorithm: {}", name);
+        println!("Testing algorithm: {name}");
         
         // Try slot 0x9a (Authentication)
         match sign_data(&mut yubikey, &test_data, algorithm, SlotId::Authentication) {
@@ -34,7 +34,7 @@ fn test_yubikey_raw_signing() {
                 println!("  Slot 0x9a success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  Slot 0x9a failed: {}", e);
+                println!("  Slot 0x9a failed: {e}");
             }
         }
         
@@ -44,7 +44,7 @@ fn test_yubikey_raw_signing() {
                 println!("  Slot 0x9c success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  Slot 0x9c failed: {}", e);
+                println!("  Slot 0x9c failed: {e}");
             }
         }
     }

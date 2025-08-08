@@ -35,7 +35,7 @@ fn test_yubikey_signing_formats() {
                 println!("  Success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  Failed: {}", e);
+                println!("  Failed: {e}");
             }
         }
     }

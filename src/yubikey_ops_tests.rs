@@ -22,7 +22,7 @@ fn test_piv_slot_validation() {
 
     for slot_value in valid_slots {
         let slot = PivSlot::new(slot_value);
-        assert!(slot.is_ok(), "Slot 0x{:02x} should be valid", slot_value);
+        assert!(slot.is_ok(), "Slot 0x{slot_value:02x} should be valid");
         let slot = slot.unwrap();
         assert_eq!(slot.as_u8(), slot_value);
     }
@@ -31,7 +31,7 @@ fn test_piv_slot_validation() {
     let invalid_slots = [0x00, 0x99, 0xFF];
     for slot_value in invalid_slots {
         let slot = PivSlot::new(slot_value);
-        assert!(slot.is_err(), "Slot 0x{:02x} should be invalid", slot_value);
+        assert!(slot.is_err(), "Slot 0x{slot_value:02x} should be invalid");
     }
 }
 
@@ -42,12 +42,12 @@ fn test_pin_validation() {
 
     for pin_str in valid_pins {
         let pin = PivPin::new(pin_str);
-        assert!(pin.is_ok(), "PIN '{}' should be valid", pin_str);
+        assert!(pin.is_ok(), "PIN '{pin_str}' should be valid");
     }
 
     for pin_str in invalid_pins {
         let pin = PivPin::new(pin_str);
-        assert!(pin.is_err(), "PIN '{}' should be invalid", pin_str);
+        assert!(pin.is_err(), "PIN '{pin_str}' should be invalid");
     }
 }
 
@@ -55,7 +55,7 @@ fn test_pin_validation() {
 fn test_error_handling() {
     // Test that our error types can be created and displayed
     let error = SigningError::YubiKeyError("Test error".to_string());
-    let error_string = format!("{}", error);
+    let error_string = format!("{error}");
     assert!(error_string.contains("Test error"));
 }
 
@@ -81,11 +81,11 @@ mod hardware_tests {
 
                 match auth_result {
                     Ok(_) => println!("Authentication successful"),
-                    Err(e) => println!("Authentication failed: {}", e),
+                    Err(e) => println!("Authentication failed: {e}"),
                 }
             }
             Err(e) => {
-                println!("YubiKey connection failed: {}", e);
+                println!("YubiKey connection failed: {e}");
                 // Don't fail the test - hardware may not be available
             }
         }
@@ -114,7 +114,7 @@ mod hardware_tests {
                     );
                 }
                 Err(e) => {
-                    println!("No certificate in slot 0x{:02x}: {}", slot_value, e);
+                    println!("No certificate in slot 0x{slot_value:02x}: {e}");
                 }
             }
         }
@@ -136,10 +136,10 @@ mod hardware_tests {
         match ops.sign_hash(&test_hash, slot) {
             Ok(signature) => {
                 println!("Signing successful: {} bytes", signature.len());
-                assert!(signature.len() > 0);
+                assert!(!signature.is_empty());
             }
             Err(e) => {
-                println!("Signing failed: {}", e);
+                println!("Signing failed: {e}");
                 // May fail if no private key in slot
             }
         }
