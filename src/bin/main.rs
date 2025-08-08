@@ -1,125 +1,204 @@
-//! YubiKey PE Signer CLI
+//! Enhanced YubiKey PE Signer CLI with all improvements
 //!
-//! Command-line interface for signing PE files using YubiKey PIV certificates.
+//! Command-line interface with certificate validation, auto-detection,
+//! multiple timestamp servers, progress indicators, and configuration support.
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 use std::path::PathBuf;
-use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, SigningError};
-use yubikey_signer::{PivPin, PivSlot, TimestampUrl};
+use yubikey_signer::{
+    auto_detect::AutoDetection,
+    config::{ConfigManager, ExportFormat},
+    error::SigningError,
+    progress::ProgressStyle,
+    signing::{Signer, SigningOptions},
+    HashAlgorithm, PivPin, PivSlot, SigningConfig, TimestampUrl,
+};
 
 #[derive(Parser)]
 #[command(name = "yubikey-signer")]
-#[command(about = "Self-contained PE code signing with YubiKey PIV certificates")]
+#[command(about = "Enhanced PE code signing with YubiKey PIV certificates")]
 #[command(long_about = "
-YubiKey PE Signer - Professional code signing utility
-
-This tool signs Windows PE executables (.exe, .dll, .sys) using certificates
-stored on YubiKey PIV smartcards. It provides enterprise-grade digital signing
-with hardware security and optional RFC 3161 timestamping.
+YubiKey PE Signer - Code signing utility with advanced features
 
 EXAMPLES:
-    # Sign with certificate in default slot (9c - Digital Signature)
-    yubikey-signer myapp.exe
+    # Basic signing (auto-detects best certificate)
+    yubikey-signer sign myapp.exe
 
-    # Sign with custom slot and timestamp  
-    yubikey-signer myapp.exe -s 9a -t http://timestamp.digicert.com
+    # Sign with specific slot and progress bar
+    yubikey-signer sign myapp.exe -s 9c --progress bar
 
-    # Dry run to validate configuration
-    yubikey-signer myapp.exe --dry-run
+    # Discover available certificates
+    yubikey-signer discover
+
+    # Create configuration profile
+    yubikey-signer config create-profile development
+
+    # Test timestamp servers
+    yubikey-signer test-timestamps
 
 SLOT REFERENCE:
-    9a = Authentication (login/auth certificates)
-    9c = Digital Signature (default - code signing certificates)  
-    9d = Key Management (encryption certificates)
+    9a = Authentication (default - most certificates stored here)
+    9c = Digital Signature (code signing specific)  
+    9d = Key Management (encryption, sometimes signing)
     9e = Card Authentication (PIV authentication)
 
-For help setting up your YubiKey PIV certificate, see:
-https://developers.yubico.com/PIV/Guides/Certificate_authentication.html
+ENVIRONMENT VARIABLES:
+    YUBICO_PIN      YubiKey PIN (required)
+    RUST_LOG        Logging level (debug, info, warn, error)
 ")]
 #[command(version)]
 struct Cli {
-    /// PE file to sign (.exe, .dll, .sys, etc.)
-    #[arg(value_name = "INPUT_FILE", help = "Windows PE executable to sign")]
-    input_file: PathBuf,
-
-    /// Output file path (defaults to overwriting input file)
-    #[arg(
-        short,
-        long,
-        value_name = "OUTPUT_FILE",
-        help = "Path for signed output file"
-    )]
-    output: Option<PathBuf>,
-
-    /// YubiKey PIV slot containing signing certificate
-    #[arg(
-        short = 's',
-        long,
-        default_value = "9c",
-        value_name = "SLOT",
-        help = "PIV slot (9a=Auth, 9c=Sign, 9d=KeyMgmt, 9e=CardAuth)",
-        long_help = "YubiKey PIV slot containing the signing certificate\n\nValid slots:\n  • 9a - Authentication (login/auth certificates)\n  • 9c - Digital Signature (default - code signing certificates)\n  • 9d - Key Management (encryption certificates)\n  • 9e - Card Authentication (PIV authentication)\n\nFormat: hex (9c) or decimal (156)"
-    )]
-    slot: String,
-
-    /// YubiKey PIV PIN (or set YUBICO_PIN environment variable)
-    #[arg(
-        short,
-        long,
-        value_name = "PIN",
-        help = "6-8 digit PIN (or use YUBICO_PIN env var for automation)"
-    )]
-    pin: Option<String>,
-
-    /// Cryptographic hash algorithm for signing
-    #[arg(
-        short = 'a',
-        long,
-        default_value = "sha256",
-        value_name = "ALGORITHM",
-        help = "Hash algorithm (sha256 recommended for compatibility)",
-        long_help = "Cryptographic hash algorithm for digital signature\n\nValid options:\n  • sha256 - SHA-256 (recommended, widely compatible)\n  • sha384 - SHA-384 (higher security, larger signatures)\n  • sha512 - SHA-512 (highest security, largest signatures)"
-    )]
-    algorithm: HashAlgorithmArg,
-
-    /// RFC 3161 timestamp server URL for trusted timestamps
-    #[arg(
-        short,
-        long,
-        value_name = "URL",
-        help = "Timestamp server URL (recommended for long-term verification)"
-    )]
-    timestamp_url: Option<String>,
-
-    /// Description embedded in the digital signature
-    #[arg(
-        short,
-        long,
-        value_name = "TEXT",
-        help = "Description text embedded in signature metadata"
-    )]
-    description: Option<String>,
-
-    /// URL embedded in the digital signature  
-    #[arg(
-        short = 'u',
-        long,
-        value_name = "URL",
-        help = "URL embedded in signature metadata (typically product homepage)"
-    )]
-    url: Option<String>,
-
-    /// Enable verbose debug output
-    #[arg(short, long, help = "Show detailed progress and debug information")]
-    verbose: bool,
-
-    /// Validate configuration without signing (dry run)
-    #[arg(long, help = "Test YubiKey connection and certificate without signing")]
-    dry_run: bool,
+    #[command(subcommand)]
+    command: Commands,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(Subcommand)]
+enum Commands {
+    /// Sign a PE file with enhanced features
+    Sign {
+        /// PE file to sign (.exe, .dll, .sys, etc.)
+        #[arg(value_name = "INPUT_FILE")]
+        input_file: PathBuf,
+
+        /// Output file path (defaults to overwriting input file)
+        #[arg(short, long, value_name = "OUTPUT_FILE")]
+        output: Option<PathBuf>,
+
+        /// PIV slot to use for signing
+        #[arg(short, long, value_name = "SLOT_ID", default_value = "9a")]
+        slot: String,
+
+        /// Timestamp server URL (overrides config)
+        #[arg(short, long, value_name = "URL")]
+        timestamp_url: Option<String>,
+
+        /// Hash algorithm to use
+        #[arg(long, value_enum, default_value = "sha256")]
+        hash: HashAlgorithmArg,
+
+        /// Progress indicator style
+        #[arg(long, value_enum)]
+        progress: Option<ProgressStyleArg>,
+
+        /// Disable progress indicators
+        #[arg(long)]
+        no_progress: bool,
+
+        /// Skip certificate validation
+        #[arg(long)]
+        skip_validation: bool,
+
+        /// Disable auto-detection fallback
+        #[arg(long)]
+        no_auto_detect: bool,
+
+        /// Use basic timestamp client (disable enhanced features)
+        #[arg(long)]
+        basic_timestamps: bool,
+
+        /// Dry run - validate configuration without signing
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Discover available YubiKey certificates and slots
+    Discover {
+        /// Show detailed certificate information
+        #[arg(short, long)]
+        detailed: bool,
+
+        /// Test signing capability (requires PIN)
+        #[arg(short, long)]
+        test_signing: bool,
+    },
+
+    /// Test timestamp server connectivity
+    TestTimestamps {
+        /// Test specific server URL
+        #[arg(short, long)]
+        url: Option<String>,
+
+        /// Show response details
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Configuration management
+    #[command(subcommand)]
+    Config(ConfigCommands),
+
+    /// Verify signature of a signed PE file (uses PowerShell Get-AuthenticodeSignature)
+    Verify {
+        /// Signed PE file to verify
+        #[arg(value_name = "SIGNED_FILE")]
+        file: PathBuf,
+
+        /// Show detailed signature information
+        #[arg(short, long)]
+        verbose: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Show current configuration
+    Show,
+
+    /// Create default configuration file
+    Init,
+
+    /// Set a configuration value
+    Set {
+        /// Configuration key
+        key: String,
+        /// Configuration value
+        value: String,
+    },
+
+    /// Export configuration
+    Export {
+        /// Export format
+        #[arg(short, long, value_enum, default_value = "toml")]
+        format: ExportFormatArg,
+        /// Output file (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Import configuration
+    Import {
+        /// Configuration file to import
+        file: PathBuf,
+        /// Import format
+        #[arg(short, long, value_enum, default_value = "toml")]
+        format: ExportFormatArg,
+    },
+
+    /// Create a configuration profile
+    CreateProfile {
+        /// Profile name
+        name: String,
+        /// Profile description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+
+    /// List available profiles
+    ListProfiles,
+
+    /// Load a configuration profile
+    LoadProfile {
+        /// Profile name
+        name: String,
+    },
+}
+
+#[derive(ValueEnum, Clone)]
 enum HashAlgorithmArg {
     Sha256,
     Sha384,
@@ -136,449 +215,543 @@ impl From<HashAlgorithmArg> for HashAlgorithm {
     }
 }
 
-/// Create a detailed miette error with helpful context for signing failures
-#[allow(dead_code)]
-fn create_detailed_signing_error(e: SigningError) -> miette::Report {
-    match &e {
-        SigningError::YubiKeyError(msg) => {
-            miette::miette!(
-                help = "• Ensure YubiKey is inserted and recognized\n• Verify the PIV slot contains a valid certificate\n• Check that the PIN is correct\n• Try running 'ykman piv info' to verify PIV functionality",
-                "YubiKey error: {}",
-                msg
-            )
-        }
-        SigningError::IoError(msg) => {
-            miette::miette!(
-                help = "• Ensure you have read access to the input file\n• Ensure you have write access to the output location\n• Check that the file is not locked by another process",
-                "File access error: {}",
-                msg
-            )
-        }
-        SigningError::PeParsingError(msg) => {
-            miette::miette!(
-                help = "• Verify the input file is a valid PE executable\n• Check that the file is not corrupted\n• Ensure the PE file is not already signed (unless overwriting)",
-                "PE file error: {}",
-                msg
-            )
-        }
-        SigningError::NetworkError(msg) => {
-            miette::miette!(
-                help = "• Check internet connectivity\n• Verify the timestamp server URL is correct\n• Try without timestamping (remove -t flag) as a workaround",
-                "Network error: {}",
-                msg
-            )
-        }
-        SigningError::ValidationError(msg) => {
-            miette::miette!(
-                help = "Check the parameter format and try again with valid values",
-                "Validation error: {}",
-                msg
-            )
-        }
-        _ => {
-            miette::miette!(
-                help = "Run with --verbose for more details, or consult the documentation",
-                "Signing failed: {}",
-                e
-            )
+#[derive(ValueEnum, Clone)]
+enum ProgressStyleArg {
+    Percentage,
+    Bar,
+    Spinner,
+    Silent,
+}
+
+impl From<ProgressStyleArg> for ProgressStyle {
+    fn from(arg: ProgressStyleArg) -> Self {
+        match arg {
+            ProgressStyleArg::Percentage => ProgressStyle::Percentage,
+            ProgressStyleArg::Bar => ProgressStyle::ProgressBar,
+            ProgressStyleArg::Spinner => ProgressStyle::Spinner,
+            ProgressStyleArg::Silent => ProgressStyle::Silent,
         }
     }
+}
+
+#[derive(ValueEnum, Clone)]
+enum ExportFormatArg {
+    Toml,
+    Json,
+    Yaml,
+}
+
+impl From<ExportFormatArg> for ExportFormat {
+    fn from(arg: ExportFormatArg) -> Self {
+        match arg {
+            ExportFormatArg::Toml => ExportFormat::Toml,
+            ExportFormatArg::Json => ExportFormat::Json,
+            ExportFormatArg::Yaml => ExportFormat::Yaml,
+        }
+    }
+}
+
+/// Parameters for the sign command
+struct SignCommandArgs {
+    input_file: PathBuf,
+    output: Option<PathBuf>,
+    slot: String,
+    timestamp_url: Option<String>,
+    hash: HashAlgorithmArg,
+    progress: Option<ProgressStyleArg>,
+    no_progress: bool,
+    skip_validation: bool,
+    no_auto_detect: bool,
+    basic_timestamps: bool,
+    dry_run: bool,
+    verbose: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let cli = Cli::parse();
 
-    // Initialize logging
-    let log_level = if cli.verbose {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Info
-    };
+    match cli.command {
+        Commands::Sign {
+            input_file,
+            output,
+            slot,
+            timestamp_url,
+            hash,
+            progress,
+            no_progress,
+            skip_validation,
+            no_auto_detect,
+            basic_timestamps,
+            dry_run,
+            verbose,
+        } => {
+            let args = SignCommandArgs {
+                input_file,
+                output,
+                slot,
+                timestamp_url,
+                hash,
+                progress,
+                no_progress,
+                skip_validation,
+                no_auto_detect,
+                basic_timestamps,
+                dry_run,
+                verbose,
+            };
+            handle_sign_command(args).await?;
+        }
 
-    env_logger::Builder::new()
-        .filter_level(log_level)
-        .format_timestamp_secs()
-        .init();
+        Commands::Discover {
+            detailed,
+            test_signing,
+        } => {
+            handle_discover_command(detailed, test_signing).await?;
+        }
 
-    // Validate input file exists and is accessible
-    if !cli.input_file.exists() {
-        return Err(miette::miette!(
-            labels = [miette::LabeledSpan::at(
-                0..cli.input_file.display().to_string().len(),
-                "file path"
-            )],
-            help = "Check the file path and ensure the file exists",
-            "Input file does not exist: {}",
-            cli.input_file.display()
-        ));
-    }
+        Commands::TestTimestamps { url, verbose } => {
+            handle_test_timestamps_command(url, verbose).await?;
+        }
 
-    if !cli.input_file.is_file() {
-        return Err(miette::miette!(
-            help = "Provide a path to a PE executable file (.exe, .dll, .sys)",
-            "Path is not a regular file: {}",
-            cli.input_file.display()
-        ));
-    }
+        Commands::Config(config_cmd) => {
+            handle_config_command(config_cmd).await?;
+        }
 
-    // Validate it's a PE file by checking the header
-    if let Ok(metadata) = std::fs::metadata(&cli.input_file) {
-        if metadata.len() < 64 {
-            return Err(miette::miette!(
-                help = "PE files require at least 64 bytes for DOS and PE headers",
-                "File is too small to be a valid PE executable: {} bytes (minimum: 64)",
-                metadata.len()
-            ));
+        Commands::Verify { file, verbose } => {
+            handle_verify_command(file, verbose).await?;
         }
     }
 
-    // Check for common file extensions
-    if let Some(extension) = cli.input_file.extension() {
-        let ext_str = extension.to_string_lossy().to_lowercase();
-        if !["exe", "dll", "sys", "scr", "ocx"].contains(&ext_str.as_str()) {
-            println!("⚠️  Warning: File extension '{ext_str}' is not a typical PE file type");
-            println!("   Common PE types: .exe, .dll, .sys, .scr, .ocx");
-            println!("   Continuing anyway...");
-            println!();
-        }
-    }
+    Ok(())
+}
 
-    // Determine output file
-    let output_file = cli.output.clone().unwrap_or_else(|| cli.input_file.clone());
-
-    // Get PIN from command line, environment variable, or secure prompt
-    let pin = match cli.pin {
-        Some(pin) => {
-            // Validate PIN format (YubiKey PIV PINs can be 6-8 characters, alphanumeric + some symbols)
-            if pin.len() < 6 || pin.len() > 8 {
-                return Err(miette::miette!(
-                    help = "YubiKey PIV PINs must be between 6 and 8 characters",
-                    "Invalid PIN length: {} characters",
-                    pin.len()
-                ));
-            }
-            if !pin
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "!@#$%^&*()_+-=[]{}|;':\",./<>?".contains(c))
-            {
-                return Err(miette::miette!(
-                    help = "PIN can contain letters, numbers, and common symbols",
-                    "PIN contains invalid characters"
-                ));
-            }
-            pin
-        }
-        None => {
-            // Try environment variable first
-            match std::env::var("YUBICO_PIN") {
-                Ok(env_pin) if !env_pin.is_empty() => {
-                    // Validate environment PIN with relaxed rules
-                    if env_pin.len() < 6 || env_pin.len() > 8 {
-                        return Err(miette::miette!(
-                            help = "Set a valid 6-8 character PIN in the YUBICO_PIN environment variable",
-                            "YUBICO_PIN environment variable contains invalid PIN: {} characters",
-                            env_pin.len()
-                        ));
-                    }
-                    println!("🔐 Using PIN from YUBICO_PIN environment variable");
-                    env_pin
-                }
-                _ => {
-                    println!("🔐 Enter YubiKey PIN (6-8 characters): ");
-                    print!("   PIN: ");
-                    std::io::Write::flush(&mut std::io::stdout()).into_diagnostic()?;
-
-                    // Read PIN securely (without echo)
-                    let pin = rpassword::read_password().into_diagnostic()?;
-                    if pin.is_empty() {
-                        return Err(miette::miette!(
-                            help = "Use --pin <PIN>, set YUBICO_PIN environment variable, or enter PIN when prompted",
-                            "PIN cannot be empty"
-                        ));
-                    }
-                    if pin.len() < 6 || pin.len() > 8 {
-                        return Err(miette::miette!(
-                            help = "YubiKey PIV PINs are 6-8 characters long",
-                            "Invalid PIN format: {} characters",
-                            pin.len()
-                        ));
-                    }
-                    pin
-                }
-            }
-        }
-    };
-
-    // Parse PIV slot and create PivSlot
-    let slot_id = parse_piv_slot(&cli.slot)
-        .with_context(|| format!("Invalid PIV slot '{}'. Valid options: 9a (Auth), 9c (Sign), 9d (KeyMgmt), 9e (CardAuth)", cli.slot))?;
-    let slot = PivSlot::new(slot_id)
+async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
+    // Check if YUBICO_PIN is set
+    let pin = std::env::var("YUBICO_PIN")
         .into_diagnostic()
-        .with_context(|| "PIV slot validation failed")?;
+        .context("YUBICO_PIN environment variable not set")?;
 
-    // Create PivPin
-    let piv_pin = PivPin::new(pin)
+    // Parse slot
+    let piv_slot = parse_piv_slot(&args.slot)
         .into_diagnostic()
-        .with_context(|| "PIN validation failed")?;
+        .context("Invalid PIV slot")?;
 
-    // Create TimestampUrl if provided
-    let timestamp_url = if let Some(url_str) = cli.timestamp_url {
-        Some(
-            TimestampUrl::new(url_str)
-                .into_diagnostic()
-                .with_context(|| "Timestamp URL validation failed")?,
-        )
+    // Determine output path
+    let output_path = args.output.unwrap_or_else(|| args.input_file.clone());
+
+    // Build signing configuration
+    let mut options = if let Ok(_signer) = Signer::from_config_file() {
+        if args.verbose {
+            println!("📋 Loaded configuration from file");
+        }
+        // Override with command line arguments
+        // Create enhanced signing options
+        let mut opts = SigningOptions::default();
+        opts.config.pin = PivPin::new(pin).into_diagnostic()?;
+        opts.config.piv_slot = piv_slot;
+        opts.config.hash_algorithm = args.hash.into();
+        opts.verbose = args.verbose;
+        opts
     } else {
-        None
+        // Create default options
+        let signing_config = SigningConfig {
+            pin: PivPin::new(pin).into_diagnostic()?,
+            piv_slot,
+            timestamp_url: args
+                .timestamp_url
+                .as_ref()
+                .map(|url| TimestampUrl::new(url.clone()).into_diagnostic())
+                .transpose()?,
+            hash_algorithm: args.hash.into(),
+            embed_certificate: true,
+        };
+
+        SigningOptions {
+            config: signing_config,
+            show_progress: !args.no_progress,
+            progress_style: args.progress.map(|p| p.into()),
+            validate_certificate: !args.skip_validation,
+            auto_detect_fallback: !args.no_auto_detect,
+            use_enhanced_timestamps: !args.basic_timestamps,
+            timestamp_config: None,
+            verbose: args.verbose,
+        }
     };
 
-    // Create signing configuration
-    let config = SigningConfig {
-        piv_slot: slot,
-        pin: piv_pin,
-        hash_algorithm: cli.algorithm.into(),
-        timestamp_url,
-        embed_certificate: true, // Default to embedding certificate
-    };
-
-    // Display configuration in a user-friendly way
-    println!("🔐 YubiKey PE Code Signer");
-    println!("========================");
-    println!("📁 Input file:       {}", cli.input_file.display());
-    println!("📁 Output file:      {}", output_file.display());
-    println!(
-        "🔑 PIV slot:         {} ({})",
-        slot.description(),
-        get_slot_description(slot.as_u8())
-    );
-    println!("🔒 Hash algorithm:   {:?}", config.hash_algorithm);
-    if let Some(ref ts_url) = config.timestamp_url {
-        println!("⏰ Timestamp URL:    {ts_url}");
-    } else {
-        println!("⏰ Timestamp URL:    None (signature will not include timestamp)");
-    }
-    if let Some(ref desc) = cli.description {
-        println!("📝 Description:      {desc}");
-    }
-    if let Some(ref url_val) = cli.url {
-        println!("🌐 Product URL:      {url_val}");
+    // Override timestamp URL if provided
+    if let Some(url) = &args.timestamp_url {
+        options.config.timestamp_url = Some(TimestampUrl::new(url.clone()).into_diagnostic()?);
     }
 
-    // Show file size info
-    if let Ok(metadata) = std::fs::metadata(&cli.input_file) {
+    if args.dry_run {
+        println!("🔍 Dry run mode - validating configuration");
+        println!("  Input file: {}", args.input_file.display());
+        println!("  Output file: {}", output_path.display());
+        println!("  PIV slot: {}", options.config.piv_slot);
         println!(
-            "📊 Input file size:  {} bytes ({:.1} KB)",
-            metadata.len(),
-            metadata.len() as f64 / 1024.0
+            "  Hash algorithm: {}",
+            options.config.hash_algorithm.as_str()
         );
-    }
-
-    println!();
-
-    if cli.dry_run {
-        println!("🔍 DRY RUN MODE - Validation Only");
-        println!("No files will be modified or signed");
-        println!();
-
-        // Perform comprehensive validation
-        match validate_signing_environment(&config).await {
-            Ok(_) => {
-                println!("✅ All validation checks passed!");
-                println!();
-                println!("🎯 Ready to sign - run without --dry-run to proceed");
-                println!(
-                    "   Command: yubikey-signer {} -s {} -a {:?}{}",
-                    cli.input_file.display(),
-                    cli.slot,
-                    config.hash_algorithm,
-                    if config.timestamp_url.is_some() {
-                        format!(" -t {}", config.timestamp_url.as_ref().unwrap())
-                    } else {
-                        String::new()
-                    }
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(miette::miette!(
-                    help = "Check YubiKey connection, PIN, certificate, and network connectivity",
-                    "Validation failed: {}",
-                    e
-                ));
-            }
+        if let Some(ts_url) = &options.config.timestamp_url {
+            println!("  Timestamp URL: {}", ts_url.as_str());
         }
+        println!(
+            "  Certificate validation: {}",
+            if options.validate_certificate {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+        println!(
+            "  Auto-detection: {}",
+            if options.auto_detect_fallback {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+        println!("✅ Configuration is valid");
+        return Ok(());
     }
 
     // Perform the signing
-    println!("Starting signing process...");
+    let signer = Signer::new(options);
 
-    sign_pe_file(&cli.input_file, &output_file, config)
-        .await
-        .into_diagnostic()
-        .with_context(|| "Code signing operation failed")?;
+    match signer.sign_pe_file(&args.input_file, &output_path).await {
+        Ok(result) => {
+            println!("✅ File signed successfully!");
+            println!("  Duration: {:.2}s", result.duration.as_secs_f64());
+            println!("  File size: {} bytes", result.file_size);
+            println!("  Slot used: {}", result.slot_used);
 
-    println!("✓ Successfully signed PE file");
-    println!("  Output: {}", output_file.display());
+            if let Some(ref server) = result.timestamp_server_used {
+                println!("  Timestamp server: {server}");
+            }
 
-    // Display file info
-    if let Ok(metadata) = std::fs::metadata(&output_file) {
-        println!("  Size: {} bytes", metadata.len());
+            if !result.warnings.is_empty() {
+                println!("\n⚠️  Warnings:");
+                for warning in &result.warnings {
+                    println!("  - {warning}");
+                }
+            }
+
+            if args.verbose {
+                if let Some(ref analysis) = result.certificate_analysis {
+                    println!("\n📜 Certificate Analysis:");
+                    println!("  Subject: {}", analysis.subject);
+                    println!("  Issuer: {}", analysis.issuer);
+                    println!("  Days until expiry: {}", analysis.days_until_expiry);
+                    println!(
+                        "  Code signing suitable: {}",
+                        analysis.is_code_signing_suitable
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Signing failed: {e}");
+            std::process::exit(1);
+        }
     }
-
-    println!();
-    println!("Signing completed successfully!");
 
     Ok(())
 }
 
-/// Get human-readable description for PIV slot
-fn get_slot_description(slot: u8) -> &'static str {
-    match slot {
-        0x9a => "Authentication",
-        0x9c => "Digital Signature",
-        0x9d => "Key Management",
-        0x9e => "Card Authentication",
-        _ => "Custom/Unknown",
-    }
-}
+async fn handle_discover_command(detailed: bool, test_signing: bool) -> Result<()> {
+    println!("🔍 Discovering YubiKey certificates and capabilities...");
 
-/// Parse PIV slot from string (hex or decimal)
-fn parse_piv_slot(slot_str: &str) -> Result<u8> {
-    let slot = if slot_str.starts_with("0x") || slot_str.starts_with("0X") {
-        // Hex format
-        u8::from_str_radix(&slot_str[2..], 16)
-            .into_diagnostic()
-            .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
-    } else if slot_str.len() == 2 && slot_str.chars().all(|c| c.is_ascii_hexdigit()) {
-        // Hex format without prefix
-        u8::from_str_radix(slot_str, 16)
-            .into_diagnostic()
-            .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
+    // Check if YUBICO_PIN is set for authentication
+    let pin = if test_signing {
+        Some(
+            std::env::var("YUBICO_PIN")
+                .into_diagnostic()
+                .context("YUBICO_PIN environment variable required for testing")?,
+        )
     } else {
-        // Decimal format
-        slot_str
-            .parse::<u8>()
-            .into_diagnostic()
-            .with_context(|| format!("Invalid decimal format in slot '{slot_str}'"))?
+        std::env::var("YUBICO_PIN").ok()
     };
 
-    // Validate common PIV slots
-    match slot {
-        0x9a | 0x9c | 0x9d | 0x9e => Ok(slot),
-        _ => {
-            log::warn!("Unusual PIV slot 0x{slot:02x} - common slots are 0x9a, 0x9c, 0x9d, 0x9e");
+    // Connect to YubiKey
+    let mut yubikey_ops = yubikey_signer::YubiKeyOperations::connect()
+        .into_diagnostic()
+        .context("Failed to connect to YubiKey")?;
 
-            // Provide a more helpful error for clearly invalid slots
-            if slot > 0x9e {
-                Err(miette::miette!(
-                    help = "Common PIV slots: 9a (Auth), 9c (Sign), 9d (KeyMgmt), 9e (CardAuth)",
-                    "Invalid PIV slot 0x{:02x}. PIV slots are typically in range 0x9a-0x9e",
-                    slot
-                ))
+    if let Some(pin_str) = pin {
+        let piv_pin = PivPin::new(pin_str).into_diagnostic()?;
+        yubikey_ops
+            .authenticate(&piv_pin)
+            .into_diagnostic()
+            .context("Failed to authenticate with YubiKey")?;
+
+        // Perform discovery
+        let discovery = AutoDetection::discover_yubikey_capabilities(&mut yubikey_ops)
+            .into_diagnostic()
+            .context("Failed to discover YubiKey capabilities")?;
+
+        println!("\n📊 Discovery Results:");
+        println!(
+            "  Total certificates found: {}",
+            discovery.certificate_count
+        );
+        println!(
+            "  Suitable for code signing: {}",
+            discovery.suitable_slots.len()
+        );
+
+        if let Some(recommended) = discovery.recommended_slot {
+            println!("  🏆 Recommended slot: {recommended}");
+        }
+
+        println!("\n📋 Slot Analysis:");
+        for slot_info in &discovery.slots {
+            print!("  Slot {}: ", slot_info.slot);
+
+            if slot_info.has_certificate {
+                if let Some(ref analysis) = slot_info.certificate_analysis {
+                    if analysis.is_code_signing_suitable {
+                        println!("✅ Suitable for code signing");
+                        if detailed {
+                            println!("    Subject: {}", analysis.subject);
+                            println!("    Days until expiry: {}", analysis.days_until_expiry);
+                            if !analysis.warnings.is_empty() {
+                                for warning in &analysis.warnings {
+                                    println!("    ⚠️  {warning}");
+                                }
+                            }
+                        }
+                    } else {
+                        println!("❌ Not suitable for code signing");
+                        if detailed {
+                            for warning in &analysis.warnings {
+                                println!("    - {warning}");
+                            }
+                        }
+                    }
+                } else {
+                    println!("❓ Certificate analysis failed");
+                }
             } else {
-                Ok(slot) // Allow other slots but with warning
+                println!("⭕ No certificate");
             }
         }
-    }
-}
 
-/// Validate that we can sign with the current configuration
-async fn validate_signing_environment(config: &SigningConfig) -> Result<()> {
-    log::info!("Validating signing environment...");
-
-    // Test YubiKey connection and authentication
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
-
-    let mut yubikey_ops = YubiKeyOperations::connect()
-        .into_diagnostic()
-        .with_context(|| "Failed to connect to YubiKey")?;
-    yubikey_ops
-        .authenticate(&config.pin)
-        .into_diagnostic()
-        .with_context(|| "Failed to authenticate with YubiKey PIN")?;
-
-    // Verify certificate exists in slot
-    let _cert = yubikey_ops
-        .get_certificate(config.piv_slot)
-        .into_diagnostic()
-        .with_context(|| {
-            format!(
-                "Failed to read certificate from PIV slot {}",
-                config.piv_slot.description()
-            )
-        })?;
-    log::info!(
-        "✓ Certificate found in PIV slot {}",
-        config.piv_slot.description()
-    );
-
-    // Test timestamp server if configured
-    if let Some(ref timestamp_url) = config.timestamp_url {
-        log::info!("Testing timestamp server connectivity...");
-
-        use yubikey_signer::timestamp::TimestampClient;
-        let client = TimestampClient::new(timestamp_url);
-
-        // Test with dummy hash
-        let test_hash = vec![0u8; 32];
-        match client.get_timestamp(&test_hash).await {
-            Ok(_) => {
-                log::info!("✓ Timestamp server reachable");
+        if !discovery.warnings.is_empty() {
+            println!("\n⚠️  Discovery Warnings:");
+            for warning in &discovery.warnings {
+                println!("  - {warning}");
             }
-            Err(e) => {
-                log::warn!("Timestamp server test failed: {e}");
-                log::warn!("Signing will proceed without timestamp");
-            }
+        }
+    } else {
+        println!("ℹ️  Set YUBICO_PIN environment variable for full discovery with authentication");
+        println!("   Basic slot enumeration only (no certificate analysis):");
+
+        // Basic enumeration without PIN
+        let slots = [0x9a, 0x9c, 0x9d, 0x9e];
+        for &slot_id in &slots {
+            let slot = PivSlot::new(slot_id).unwrap();
+            println!("  Slot {slot}: Present (authentication required for analysis)");
         }
     }
 
-    log::info!("Environment validation completed");
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+async fn handle_test_timestamps_command(url: Option<String>, verbose: bool) -> Result<()> {
+    println!("🌐 Testing timestamp server connectivity...");
 
-    #[test]
-    fn test_parse_piv_slot_hex_with_prefix() {
-        assert_eq!(parse_piv_slot("0x9c").unwrap(), 0x9c);
-        assert_eq!(parse_piv_slot("0X9a").unwrap(), 0x9a);
+    if let Some(url) = url {
+        // Test specific URL
+        let timestamp_url = TimestampUrl::new(url).into_diagnostic()?;
+        let client = yubikey_signer::timestamp::TimestampClient::new(&timestamp_url);
+
+        print!("Testing {}: ", timestamp_url.as_str());
+
+        let test_data = b"timestamp_connectivity_test";
+        match client.get_timestamp(test_data).await {
+            Ok(_) => println!("✅ Success"),
+            Err(e) => {
+                println!("❌ Failed");
+                if verbose {
+                    println!("  Error: {e}");
+                }
+            }
+        }
+    } else {
+        // Test all configured servers
+        let client = yubikey_signer::timestamp::TimestampClient::default();
+        let results = client.test_server_connectivity().await;
+
+        println!("\n📊 Server Connectivity Results:");
+        for (server, reachable, error) in results {
+            print!("  {server}: ");
+            if reachable {
+                println!("✅ Reachable");
+            } else {
+                println!("❌ Failed");
+                if verbose {
+                    if let Some(err) = error {
+                        println!("    Error: {err}");
+                    }
+                }
+            }
+        }
     }
 
-    #[test]
-    fn test_parse_piv_slot_hex_without_prefix() {
-        assert_eq!(parse_piv_slot("9c").unwrap(), 0x9c);
-        assert_eq!(parse_piv_slot("9a").unwrap(), 0x9a);
+    Ok(())
+}
+
+async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
+    let config_manager = ConfigManager::new().into_diagnostic()?;
+
+    match config_cmd {
+        ConfigCommands::Show => match config_manager.load() {
+            Ok(config) => {
+                println!("📋 Current Configuration:");
+                println!("  Default PIV slot: 0x{:02x}", config.default_piv_slot);
+                println!("  Hash algorithm: {}", config.default_hash_algorithm);
+                println!(
+                    "  Primary timestamp server: {}",
+                    config.primary_timestamp_server
+                );
+                println!(
+                    "  Fallback servers: {}",
+                    config.fallback_timestamp_servers.len()
+                );
+                println!("  Embed certificate: {}", config.embed_certificate);
+                println!("  Progress style: {}", config.progress_style);
+                println!(
+                    "  Configuration file: {}",
+                    config_manager.config_path().display()
+                );
+            }
+            Err(_) => {
+                println!("📋 No configuration file found. Use 'config init' to create one.");
+            }
+        },
+
+        ConfigCommands::Init => {
+            let _config = config_manager.load_or_create_default().into_diagnostic()?;
+            println!(
+                "✅ Configuration initialized: {}",
+                config_manager.config_path().display()
+            );
+            println!("   Edit the file to customize settings, or use 'config set' commands.");
+        }
+
+        ConfigCommands::Set { key, value } => {
+            config_manager
+                .update_value(&key, &value)
+                .into_diagnostic()?;
+            println!("✅ Configuration updated: {key} = {value}");
+        }
+
+        ConfigCommands::Export { format, output } => {
+            let content = config_manager
+                .export_config(format.into())
+                .into_diagnostic()?;
+
+            if let Some(output_path) = output {
+                std::fs::write(&output_path, content).into_diagnostic()?;
+                println!("✅ Configuration exported to: {}", output_path.display());
+            } else {
+                println!("{content}");
+            }
+        }
+
+        ConfigCommands::Import { file, format } => {
+            let content = std::fs::read_to_string(&file).into_diagnostic()?;
+            config_manager
+                .import_config(&content, format.into())
+                .into_diagnostic()?;
+            println!("✅ Configuration imported from: {}", file.display());
+        }
+
+        ConfigCommands::CreateProfile {
+            name: _,
+            description: _,
+        } => {
+            // This would require profile manager implementation
+            println!("📁 Profile management not yet implemented in this demo");
+        }
+
+        ConfigCommands::ListProfiles => {
+            println!("📁 Profile management not yet implemented in this demo");
+        }
+
+        ConfigCommands::LoadProfile { name: _ } => {
+            println!("📁 Profile management not yet implemented in this demo");
+        }
     }
 
-    #[test]
-    fn test_parse_piv_slot_decimal() {
-        assert_eq!(parse_piv_slot("156").unwrap(), 156); // 0x9c
-        assert_eq!(parse_piv_slot("154").unwrap(), 154); // 0x9a
+    Ok(())
+}
+
+async fn handle_verify_command(file: PathBuf, verbose: bool) -> Result<()> {
+    println!("🔍 Verifying signature using PowerShell Get-AuthenticodeSignature...");
+
+    // Build PowerShell command
+    let script_path = std::env::current_exe()
+        .into_diagnostic()?
+        .parent()
+        .unwrap()
+        .join("scripts")
+        .join("verify_signature.ps1");
+
+    if !script_path.exists() {
+        println!(
+            "❌ Verification script not found: {}",
+            script_path.display()
+        );
+        println!(
+            "   You can manually verify using: Get-AuthenticodeSignature '{}'",
+            file.display()
+        );
+        return Ok(());
     }
 
-    #[test]
-    fn test_parse_piv_slot_invalid() {
-        assert!(parse_piv_slot("xyz").is_err());
-        assert!(parse_piv_slot("256").is_err()); // > u8::MAX
-        assert!(parse_piv_slot("").is_err());
+    let mut cmd = std::process::Command::new("pwsh");
+    cmd.arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-File")
+        .arg(&script_path)
+        .arg("-FilePath")
+        .arg(&file);
+
+    if verbose {
+        cmd.arg("-Verbose");
     }
 
-    #[test]
-    fn test_hash_algorithm_conversion() {
-        assert!(matches!(
-            HashAlgorithm::from(HashAlgorithmArg::Sha256),
-            HashAlgorithm::Sha256
-        ));
-        assert!(matches!(
-            HashAlgorithm::from(HashAlgorithmArg::Sha384),
-            HashAlgorithm::Sha384
-        ));
-        assert!(matches!(
-            HashAlgorithm::from(HashAlgorithmArg::Sha512),
-            HashAlgorithm::Sha512
-        ));
+    let output = cmd.output().into_diagnostic()?;
+
+    if output.status.success() {
+        println!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        eprintln!("❌ Verification failed:");
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        std::process::exit(1);
     }
+
+    Ok(())
+}
+
+fn parse_piv_slot(slot_str: &str) -> Result<PivSlot, SigningError> {
+    // Handle hex format (0x9a, 9a) and decimal format (154)
+    let slot_value = if slot_str.starts_with("0x") || slot_str.starts_with("0X") {
+        u8::from_str_radix(&slot_str[2..], 16)
+            .map_err(|_| SigningError::ValidationError(format!("Invalid hex slot: {slot_str}")))?
+    } else if slot_str.len() == 2 && slot_str.chars().all(|c| c.is_ascii_hexdigit()) {
+        u8::from_str_radix(slot_str, 16)
+            .map_err(|_| SigningError::ValidationError(format!("Invalid hex slot: {slot_str}")))?
+    } else {
+        slot_str
+            .parse::<u8>()
+            .map_err(|_| SigningError::ValidationError(format!("Invalid slot: {slot_str}")))?
+    };
+
+    PivSlot::new(slot_value)
 }

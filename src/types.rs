@@ -141,7 +141,7 @@ impl fmt::Display for PivPin {
 }
 
 /// Type-safe wrapper for PIV slot IDs
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PivSlot(u8);
 
 impl PivSlot {

@@ -6,6 +6,8 @@
 use std::env;
 use std::path::Path;
 use tempfile::NamedTempFile;
+#[cfg(feature = "network-tests")]
+use yubikey_signer::types::TimestampUrl;
 use yubikey_signer::types::{PivPin, PivSlot};
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, YubiKeyOperations};
 
@@ -462,23 +464,43 @@ mod network_tests {
     #[tokio::test]
     async fn test_invalid_timestamp_urls() {
         let config_base = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9c,
+            pin: PivPin::new("123456").unwrap(),
+            piv_slot: PivSlot::new(0x9c).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
         };
 
-        let invalid_urls = vec![
-            "http://definitely-does-not-exist.invalid",
+        // Test URLs that should be rejected during validation
+        let blocked_urls = vec![
             "https://127.0.0.1:99999/timestamp",
             "http://localhost:1/invalid",
+        ];
+
+        for url in blocked_urls {
+            // These should fail at TimestampUrl creation due to security validation
+            let result = TimestampUrl::new(url);
+            assert!(
+                result.is_err(),
+                "URL {} should be rejected during validation",
+                url
+            );
+            println!(
+                "Security validation correctly rejected {}: {:?}",
+                url,
+                result.unwrap_err()
+            );
+        }
+
+        // Test URLs that pass validation but should fail with network errors
+        let network_fail_urls = vec![
+            "http://definitely-does-not-exist.invalid",
             "https://expired-ssl-cert.example.com",
         ];
 
-        for url in invalid_urls {
+        for url in network_fail_urls {
             let mut config = config_base.clone();
-            config.timestamp_url = Some(url.to_string());
+            config.timestamp_url = Some(TimestampUrl::new(url).unwrap());
 
             let temp_file = NamedTempFile::new().unwrap();
             let output_path = temp_file.path().with_extension("signed.exe");
@@ -495,10 +517,10 @@ mod network_tests {
     async fn test_slow_timestamp_server() {
         // Test timeout handling
         let config = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9c,
+            pin: PivPin::new("123456").unwrap(),
+            piv_slot: PivSlot::new(0x9c).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
-            timestamp_url: Some("http://httpstat.us/200?sleep=30000".to_string()), // 30 second delay
+            timestamp_url: Some(TimestampUrl::new("http://httpstat.us/200?sleep=30000").unwrap()), // 30 second delay
             embed_certificate: true,
         };
 

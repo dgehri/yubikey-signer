@@ -4,8 +4,13 @@
 //! Supports Authenticode PE signing with RFC 3161 timestamping.
 
 pub mod authenticode;
+pub mod auto_detect;
+pub mod cert_validator;
+pub mod config;
 pub mod error;
 pub mod pe;
+pub mod progress;
+pub mod signing;
 pub mod timestamp;
 pub mod types;
 pub mod yubikey_ops;
@@ -17,9 +22,11 @@ mod lib_tests;
 mod yubikey_ops_tests;
 
 use std::path::Path;
+use std::str::FromStr;
 
 pub use authenticode::AuthenticodeSigner;
 pub use error::{SigningError, SigningResult};
+pub use signing::{Signer, SigningDetails, SigningOptions};
 pub use timestamp::TimestampClient;
 pub use types::{HashData, PivPin, PivSlot, SecurePath, TimestampUrl};
 pub use yubikey_ops::YubiKeyOperations;
@@ -61,6 +68,21 @@ impl HashAlgorithm {
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
             HashAlgorithm::Sha512 => 64,
+        }
+    }
+}
+
+impl FromStr for HashAlgorithm {
+    type Err = crate::error::SigningError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "sha256" => Ok(HashAlgorithm::Sha256),
+            "sha384" => Ok(HashAlgorithm::Sha384),
+            "sha512" => Ok(HashAlgorithm::Sha512),
+            _ => Err(crate::error::SigningError::InvalidInput(format!(
+                "Invalid hash algorithm: {s}"
+            ))),
         }
     }
 }

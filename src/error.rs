@@ -43,6 +43,9 @@ pub enum SigningError {
 
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
 }
 
 impl From<yubikey::Error> for SigningError {
