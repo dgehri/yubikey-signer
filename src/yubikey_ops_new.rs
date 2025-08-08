@@ -36,7 +36,7 @@ impl YubiKeyOperations {
         let yubikey = YubiKey::open()
             .map_err(|e| SigningError::YubikeyError(format!("Failed to open YubiKey: {}", e)))?;
         
-        log::info!("Successfully connected to YubiKey");
+        log::info!("Connected to YubiKey");
         Ok(Self {
             yubikey,
             authenticated: false,
@@ -52,7 +52,7 @@ impl YubiKeyOperations {
             .map_err(|e| SigningError::YubikeyError(format!("PIN verification failed: {}", e)))?;
         
         self.authenticated = true;
-        log::info!("Successfully authenticated with YubiKey");
+        log::info!("Authenticated with YubiKey");
         Ok(())
     }
     
@@ -80,7 +80,7 @@ impl YubiKeyOperations {
                 format!("Failed to parse certificate: {}", e)
             ))?;
         
-        log::info!("Successfully retrieved certificate from slot 0x{:02x}", slot);
+        log::info!("Retrieved certificate from slot 0x{:02x}", slot);
         Ok(certificate)
     }
     
@@ -104,7 +104,7 @@ impl YubiKeyOperations {
                 format!("Failed to sign data with YubiKey: {}", e)
             ))?;
 
-        log::info!("Successfully created digital signature");
+        log::info!("Created digital signature");
         Ok(signature.to_vec())
     }
 

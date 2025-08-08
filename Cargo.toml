@@ -2,9 +2,9 @@
 name = "yubikey-signer"
 version = "0.1.0"
 edition = "2021"
-description = "Self-contained YubiKey code signing utility"
+description = "YubiKey code signing utility"
 authors = ["Daniel Gehriger <gehriger@linkcad.com>"]
-license = "GPL"
+license = "MIT"
 
 [lib]
 name = "yubikey_signer"

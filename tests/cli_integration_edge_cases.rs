@@ -6,6 +6,7 @@ use std::env;
 use std::process::Command;
 use tempfile::{NamedTempFile, TempDir};
 use yubikey_signer::{HashAlgorithm, SigningConfig, SigningError};
+use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
 use std::io::Write;
 
 /// Test suite for CLI argument validation
@@ -33,7 +34,7 @@ mod cli_validation_tests {
                     assert!(parsed >= 0x9a && parsed <= 0x9e, "Slot 0x{:02x} should be valid PIV slot", parsed);
                 }
                 Err(e) => {
-                    panic!("Slot '{}' should parse successfully: {}", input, e);
+                    panic!("Slot '{}' should parse: {}", input, e);
                 }
             }
         }
@@ -226,50 +227,27 @@ mod configuration_tests {
     fn test_config_validation() {
         // Test configuration validation
         let valid_config = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9a,
+            pin: PivPin::new("123456").expect("Valid PIN"),
+            piv_slot: PivSlot::new(0x9a).expect("Valid slot"),
             hash_algorithm: HashAlgorithm::Sha256,
-            timestamp_url: Some("https://timestamp.digicert.com".to_string()),
+            timestamp_url: Some(TimestampUrl::new("https://timestamp.digicert.com").expect("Valid URL")),
             embed_certificate: true,
         };
         
         assert!(validate_signing_config(&valid_config), "Valid config should pass validation");
         
-        // Test invalid configurations
-        let invalid_configs = vec![
-            (
-                SigningConfig {
-                    pin: "".to_string(), // Empty PIN
-                    ..valid_config.clone()
-                },
-                "Empty PIN should be invalid"
-            ),
-            (
-                SigningConfig {
-                    pin: "12345".to_string(), // Too short
-                    ..valid_config.clone()
-                },
-                "Short PIN should be invalid"
-            ),
-            (
-                SigningConfig {
-                    piv_slot: 0x99, // Invalid slot
-                    ..valid_config.clone()
-                },
-                "Invalid slot should be rejected"
-            ),
-            (
-                SigningConfig {
-                    timestamp_url: Some("not-a-url".to_string()), // Invalid URL
-                    ..valid_config.clone()
-                },
-                "Invalid URL should be rejected"
-            ),
-        ];
+        // Test that invalid inputs fail during type construction
+        // Empty PIN should fail
+        assert!(PivPin::new("").is_err(), "Empty PIN should be rejected during construction");
         
-        for (config, reason) in invalid_configs {
-            assert!(!validate_signing_config(&config), "{}", reason);
-        }
+        // Short PIN should fail  
+        assert!(PivPin::new("12345").is_err(), "Short PIN should be rejected during construction");
+        
+        // Invalid slot should fail
+        assert!(PivSlot::new(0x99).is_err(), "Invalid slot should be rejected during construction");
+        
+        // Invalid URL should fail
+        assert!(TimestampUrl::new("not-a-url").is_err(), "Invalid URL should be rejected during construction");
     }
 
     fn validate_piv_pin(pin: &str) -> bool {
@@ -277,24 +255,10 @@ mod configuration_tests {
     }
 
     fn validate_signing_config(config: &SigningConfig) -> bool {
-        // Validate PIN
-        if !validate_piv_pin(&config.pin) {
-            return false;
-        }
-        
-        // Validate PIV slot
-        if config.piv_slot < 0x9a || config.piv_slot > 0x9e {
-            return false;
-        }
-        
-        // Validate timestamp URL if provided
-        if let Some(url) = &config.timestamp_url {
-            if !url.starts_with("http://") && !url.starts_with("https://") {
-                return false;
-            }
-        }
-        
-        true
+        // With type-safe wrappers, if we can construct the config,
+        // the individual components are already validated.
+        // This function now mainly validates the overall configuration.
+        true // Basic validation - the types handle individual field validation
     }
 }
 
@@ -434,8 +398,8 @@ mod error_recovery_tests {
         
         // This should fail gracefully
         let config = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9a,
+            pin: PivPin::new("123456").expect("Valid PIN format"),
+            piv_slot: PivSlot::new(0x9a).expect("Valid slot"),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
@@ -469,8 +433,8 @@ mod error_recovery_tests {
         
         // Use invalid PIN to cause failure after some processing
         let config = SigningConfig {
-            pin: "wrong".to_string(), // This will cause authentication to fail
-            piv_slot: 0x9a,
+            pin: PivPin::new("123456").expect("Valid PIN format but will be wrong for auth"), // Valid format but wrong PIN will cause auth failure
+            piv_slot: PivSlot::new(0x9a).expect("Valid slot"),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,

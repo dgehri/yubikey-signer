@@ -1,13 +1,14 @@
 //! Test YubiKey PIV signing with different data formats
 
 use std::env;
-use yubikey_signer::yubikey_ops::YubiKeyOperations;
+use yubikey_signer::{yubikey_ops::YubiKeyOperations, types::{PivPin, PivSlot}};
 
 #[test]
 #[ignore = "Requires YubiKey hardware"]
 fn test_yubikey_signing_formats() {
     // Get PIN from environment
-    let pin = env::var("YUBICO_PIN").expect("YUBICO_PIN environment variable must be set");
+    let pin_str = env::var("YUBICO_PIN").expect("YUBICO_PIN environment variable must be set");
+    let pin = PivPin::new(&pin_str).expect("Should create valid PIN");
 
     // Connect and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect().expect("Should connect to YubiKey");
@@ -24,15 +25,17 @@ fn test_yubikey_signing_formats() {
         ("Max RSA size (256 bytes)", vec![0x06; 256]),
     ];
 
+    let slot = PivSlot::new(0x9a).expect("Should create valid slot");
+
     for (name, data) in test_cases {
         println!("Testing: {} - {} bytes", name, data.len());
 
-        match yubikey_ops.sign_hash(&data, 0x9a) {
+        match yubikey_ops.sign_hash(&data, slot) {
             Ok(signature) => {
-                println!("  ✅ Success! Signature: {} bytes", signature.len());
+                println!("  Success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  ❌ Failed: {}", e);
+                println!("  Failed: {}", e);
             }
         }
     }

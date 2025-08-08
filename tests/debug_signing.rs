@@ -1,6 +1,5 @@
 //! Quick test to check hash sizes and DigestInfo structure
 use sha2::{Digest, Sha256};
-use yubikey_signer::{HashAlgorithm, SigningConfig};
 
 #[tokio::test] 
 #[ignore = "Debug test"]

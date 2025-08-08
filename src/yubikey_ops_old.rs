@@ -55,7 +55,7 @@ impl YubiKeyOperations {
                 format!("Failed to parse certificate from YubiKey: {}", e)
             ))?;
 
-        log::info!("Successfully retrieved certificate from YubiKey");
+        log::info!("Retrieved certificate from YubiKey");
         Ok(certificate)
     }
 
@@ -77,7 +77,7 @@ impl YubiKeyOperations {
                 format!("Failed to sign data with YubiKey: {}", e)
             ))?;
 
-        log::info!("Successfully created digital signature");
+        log::info!("Created digital signature");
         Ok(signature.to_vec())
     }
 

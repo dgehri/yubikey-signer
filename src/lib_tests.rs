@@ -1,23 +1,24 @@
 //! Unit tests for the yubikey-signer library
 
 use crate::*;
+use crate::types::*;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
 #[test]
 fn test_signing_config_creation() {
     let config = SigningConfig {
-        piv_slot: 0x9c,
-        pin: "123456".to_string(),
+        piv_slot: PivSlot::new(0x9c).unwrap(),
+        pin: PivPin::new("123456").unwrap(),
         hash_algorithm: HashAlgorithm::Sha256,
-        timestamp_url: Some("http://ts.ssl.com".to_string()),
+        timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
         embed_certificate: true,
     };
     
-    assert_eq!(config.piv_slot, 0x9c);
-    assert_eq!(config.pin, "123456");
+    assert_eq!(config.piv_slot.as_u8(), 0x9c);
+    assert_eq!(config.pin.as_str(), "123456");
     assert!(matches!(config.hash_algorithm, HashAlgorithm::Sha256));
-    assert_eq!(config.timestamp_url.unwrap(), "http://ts.ssl.com");
+    assert_eq!(config.timestamp_url.unwrap().as_str(), "http://ts.ssl.com");
     assert!(config.embed_certificate);
 }
 
@@ -31,8 +32,8 @@ fn test_hash_algorithm_display() {
 #[tokio::test]
 async fn test_sign_pe_file_with_invalid_input() {
     let config = SigningConfig {
-        piv_slot: 0x9c,
-        pin: "123456".to_string(),
+        piv_slot: PivSlot::new(0x9c).unwrap(),
+        pin: PivPin::new("123456").unwrap(),
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
@@ -54,8 +55,8 @@ async fn test_sign_pe_file_with_invalid_input() {
 #[tokio::test] 
 async fn test_sign_pe_file_with_invalid_pe() {
     let config = SigningConfig {
-        piv_slot: 0x9c,
-        pin: "123456".to_string(),
+        piv_slot: PivSlot::new(0x9c).unwrap(),
+        pin: PivPin::new("123456").unwrap(),
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
@@ -81,14 +82,14 @@ async fn test_sign_pe_file_with_invalid_pe() {
 #[test]
 fn test_minimal_config() {
     let config = SigningConfig {
-        piv_slot: 0x9a,
-        pin: "654321".to_string(),
+        piv_slot: PivSlot::new(0x9a).unwrap(),
+        pin: PivPin::new("654321").unwrap(),
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
     };
     
-    assert_eq!(config.piv_slot, 0x9a);
+    assert_eq!(config.piv_slot.as_u8(), 0x9a);
     assert!(config.timestamp_url.is_none());
     assert!(!config.embed_certificate);
 }
@@ -108,10 +109,10 @@ mod integration_tests {
         // 3. Correct PIN
         
         let config = SigningConfig {
-            piv_slot: 0x9c,
-            pin: std::env::var("YUBIKEY_PIN").unwrap_or_else(|_| "123456".to_string()),
+            piv_slot: PivSlot::new(0x9c).unwrap(),
+            pin: PivPin::new(&std::env::var("YUBIKEY_PIN").unwrap_or_else(|_| "123456".to_string())).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
-            timestamp_url: Some("http://ts.ssl.com".to_string()),
+            timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
             embed_certificate: true,
         };
         
@@ -130,7 +131,7 @@ mod integration_tests {
     async fn test_timestamp_integration() {
         use crate::timestamp::TimestampClient;
         
-        let client = TimestampClient::new("http://ts.ssl.com");
+        let client = TimestampClient::new(&TimestampUrl::new("http://ts.ssl.com").unwrap());
         let test_hash = vec![1u8; 32];
         
         let result = client.get_timestamp(&test_hash).await;

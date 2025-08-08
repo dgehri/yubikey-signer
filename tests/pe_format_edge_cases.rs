@@ -12,7 +12,7 @@ fn test_minimal_pe_file() {
     // May fail due to incomplete implementation, but shouldn't crash
     match result {
         Ok(pe_info) => {
-            println!("Successfully parsed minimal PE: checksum offset {}", pe_info.checksum_offset);
+            println!("Parsed minimal PE: checksum offset {}", pe_info.checksum_offset);
         }
         Err(e) => {
             println!("Expected failure parsing minimal PE: {}", e);
@@ -79,7 +79,7 @@ fn test_malformed_sections() {
         let result = parse_pe(&data);
         // Should handle gracefully
         match result {
-            Ok(_) => println!("  Parsed successfully (surprising)"),
+            Ok(_) => println!("  Parsed (surprising)"),
             Err(e) => println!("  Failed as expected: {}", e),
         }
     }
@@ -94,7 +94,7 @@ fn test_existing_signatures() {
     match result {
         Ok(pe_info) => {
             // Should detect existing signature
-            println!("PE with existing signature parsed successfully");
+            println!("PE with existing signature parsed");
             // Check if we can detect the existing signature directory
             if pe_info.certificate_table.is_some() {
                 println!("  Detected existing certificate table");

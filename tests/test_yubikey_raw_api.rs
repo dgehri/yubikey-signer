@@ -31,20 +31,20 @@ fn test_yubikey_raw_signing() {
         // Try slot 0x9a (Authentication)
         match sign_data(&mut yubikey, &test_data, algorithm, SlotId::Authentication) {
             Ok(signature) => {
-                println!("  ✅ Slot 0x9a success! Signature: {} bytes", signature.len());
+                println!("  Slot 0x9a success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  ❌ Slot 0x9a failed: {}", e);
+                println!("  Slot 0x9a failed: {}", e);
             }
         }
         
         // Try slot 0x9c (Digital Signature)  
         match sign_data(&mut yubikey, &test_data, algorithm, SlotId::Signature) {
             Ok(signature) => {
-                println!("  ✅ Slot 0x9c success! Signature: {} bytes", signature.len());
+                println!("  Slot 0x9c success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  ❌ Slot 0x9c failed: {}", e);
+                println!("  Slot 0x9c failed: {}", e);
             }
         }
     }

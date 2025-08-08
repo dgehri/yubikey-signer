@@ -33,7 +33,7 @@ impl YubiKeyOperations {
         let yubikey = YubiKey::open()
             .map_err(|e| SigningError::YubiKeyError(format!("Failed to open YubiKey: {}", e)))?;
 
-        log::info!("Successfully connected to YubiKey");
+        log::info!("Connected to YubiKey");
         Ok(Self {
             yubikey,
             authenticated: false,
@@ -49,7 +49,7 @@ impl YubiKeyOperations {
             .map_err(|e| SigningError::YubiKeyError(format!("PIN verification failed: {}", e)))?;
 
         self.authenticated = true;
-        log::info!("Successfully authenticated with YubiKey");
+        log::info!("Authenticated with YubiKey");
         Ok(())
     }
 
