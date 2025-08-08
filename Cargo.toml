@@ -19,7 +19,6 @@ path = "src/bin/main.rs"
 yubikey = "0.8"
 
 # Cryptographic operations  
-rsa = "0.9"
 sha2 = "0.10"
 x509-cert = "0.2"
 der = "0.7"
@@ -60,3 +59,7 @@ env_logger = "0.11.8"
 hex = "0.4"
 mockall = "0.13.1"
 tokio-test = "0.4"
+
+[features]
+# Optional test feature to enable network-related tests
+network-tests = []

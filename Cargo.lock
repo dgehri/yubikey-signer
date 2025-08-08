@@ -2902,7 +2902,6 @@ dependencies = [
  "pkcs7",
  "reqwest",
  "rpassword",
- "rsa",
  "serde",
  "serde_json",
  "sha2",

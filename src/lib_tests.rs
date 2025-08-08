@@ -108,7 +108,7 @@ mod integration_tests {
         // 2. A valid PE file to sign
         // 3. Correct PIN
         
-        let config = SigningConfig {
+    let _config = SigningConfig {
             piv_slot: PivSlot::new(0x9c).unwrap(),
             pin: PivPin::new(std::env::var("YUBIKEY_PIN").unwrap_or_else(|_| "123456".to_string())).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,

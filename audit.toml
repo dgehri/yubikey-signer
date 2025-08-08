@@ -1,0 +1,8 @@
+[[advisories.ignore]]
+id = "RUSTSEC-2023-0071"
+# Justification: RSA operations are performed on hardware (YubiKey PIV) via the
+# `yubikey` crate; we don't use software RSA decryption that would be affected
+# by the Marvin timing side-channel. We monitor upstream for a fixed release.
+reason = "RSA used only on hardware via yubikey; not vulnerable in this context"
+# Revisit in 365 days
+expires = "2026-08-08"

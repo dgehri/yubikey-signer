@@ -44,13 +44,18 @@ struct Cli {
     input_file: PathBuf,
 
     /// Output file path (defaults to overwriting input file)
-    #[arg(short, long, value_name = "OUTPUT_FILE", help = "Path for signed output file")]
+    #[arg(
+        short,
+        long,
+        value_name = "OUTPUT_FILE",
+        help = "Path for signed output file"
+    )]
     output: Option<PathBuf>,
 
     /// YubiKey PIV slot containing signing certificate
     #[arg(
-        short = 's', 
-        long, 
+        short = 's',
+        long,
         default_value = "9c",
         value_name = "SLOT",
         help = "PIV slot (9a=Auth, 9c=Sign, 9d=KeyMgmt, 9e=CardAuth)",
@@ -60,8 +65,8 @@ struct Cli {
 
     /// YubiKey PIV PIN (or set YUBICO_PIN environment variable)
     #[arg(
-        short, 
-        long, 
+        short,
+        long,
         value_name = "PIN",
         help = "6-8 digit PIN (or use YUBICO_PIN env var for automation)"
     )]
@@ -69,8 +74,8 @@ struct Cli {
 
     /// Cryptographic hash algorithm for signing
     #[arg(
-        short = 'a', 
-        long, 
+        short = 'a',
+        long,
         default_value = "sha256",
         value_name = "ALGORITHM",
         help = "Hash algorithm (sha256 recommended for compatibility)",
@@ -80,16 +85,16 @@ struct Cli {
 
     /// RFC 3161 timestamp server URL for trusted timestamps
     #[arg(
-        short, 
+        short,
         long,
-        value_name = "URL", 
+        value_name = "URL",
         help = "Timestamp server URL (recommended for long-term verification)"
     )]
     timestamp_url: Option<String>,
 
     /// Description embedded in the digital signature
     #[arg(
-        short, 
+        short,
         long,
         value_name = "TEXT",
         help = "Description text embedded in signature metadata"
@@ -98,7 +103,7 @@ struct Cli {
 
     /// URL embedded in the digital signature  
     #[arg(
-        short = 'u', 
+        short = 'u',
         long,
         value_name = "URL",
         help = "URL embedded in signature metadata (typically product homepage)"
@@ -132,6 +137,7 @@ impl From<HashAlgorithmArg> for HashAlgorithm {
 }
 
 /// Create a detailed miette error with helpful context for signing failures
+#[allow(dead_code)]
 fn create_detailed_signing_error(e: SigningError) -> miette::Report {
     match &e {
         SigningError::YubiKeyError(msg) => {
@@ -198,9 +204,10 @@ async fn main() -> Result<()> {
     // Validate input file exists and is accessible
     if !cli.input_file.exists() {
         return Err(miette::miette!(
-            labels = [
-                miette::LabeledSpan::at(0..cli.input_file.display().to_string().len(), "file path")
-            ],
+            labels = [miette::LabeledSpan::at(
+                0..cli.input_file.display().to_string().len(),
+                "file path"
+            )],
             help = "Check the file path and ensure the file exists",
             "Input file does not exist: {}",
             cli.input_file.display()
@@ -251,7 +258,10 @@ async fn main() -> Result<()> {
                     pin.len()
                 ));
             }
-            if !pin.chars().all(|c| c.is_ascii_alphanumeric() || "!@#$%^&*()_+-=[]{}|;':\",./<>?".contains(c)) {
+            if !pin
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "!@#$%^&*()_+-=[]{}|;':\",./<>?".contains(c))
+            {
                 return Err(miette::miette!(
                     help = "PIN can contain letters, numbers, and common symbols",
                     "PIN contains invalid characters"
@@ -278,7 +288,7 @@ async fn main() -> Result<()> {
                     println!("🔐 Enter YubiKey PIN (6-8 characters): ");
                     print!("   PIN: ");
                     std::io::Write::flush(&mut std::io::stdout()).into_diagnostic()?;
-                    
+
                     // Read PIN securely (without echo)
                     let pin = rpassword::read_password().into_diagnostic()?;
                     if pin.is_empty() {
@@ -303,17 +313,22 @@ async fn main() -> Result<()> {
     // Parse PIV slot and create PivSlot
     let slot_id = parse_piv_slot(&cli.slot)
         .with_context(|| format!("Invalid PIV slot '{}'. Valid options: 9a (Auth), 9c (Sign), 9d (KeyMgmt), 9e (CardAuth)", cli.slot))?;
-    let slot = PivSlot::new(slot_id).into_diagnostic()
+    let slot = PivSlot::new(slot_id)
+        .into_diagnostic()
         .with_context(|| "PIV slot validation failed")?;
 
     // Create PivPin
-    let piv_pin = PivPin::new(pin).into_diagnostic()
+    let piv_pin = PivPin::new(pin)
+        .into_diagnostic()
         .with_context(|| "PIN validation failed")?;
 
     // Create TimestampUrl if provided
     let timestamp_url = if let Some(url_str) = cli.timestamp_url {
-        Some(TimestampUrl::new(url_str).into_diagnostic()
-            .with_context(|| "Timestamp URL validation failed")?)
+        Some(
+            TimestampUrl::new(url_str)
+                .into_diagnostic()
+                .with_context(|| "Timestamp URL validation failed")?,
+        )
     } else {
         None
     };
@@ -332,7 +347,11 @@ async fn main() -> Result<()> {
     println!("========================");
     println!("📁 Input file:       {}", cli.input_file.display());
     println!("📁 Output file:      {}", output_file.display());
-    println!("🔑 PIV slot:         {} ({})", slot.description(), get_slot_description(slot.as_u8()));
+    println!(
+        "🔑 PIV slot:         {} ({})",
+        slot.description(),
+        get_slot_description(slot.as_u8())
+    );
     println!("🔒 Hash algorithm:   {:?}", config.hash_algorithm);
     if let Some(ref ts_url) = config.timestamp_url {
         println!("⏰ Timestamp URL:    {ts_url}");
@@ -345,14 +364,16 @@ async fn main() -> Result<()> {
     if let Some(ref url_val) = cli.url {
         println!("🌐 Product URL:      {url_val}");
     }
-    
+
     // Show file size info
     if let Ok(metadata) = std::fs::metadata(&cli.input_file) {
-        println!("📊 Input file size:  {} bytes ({:.1} KB)", 
-                 metadata.len(), 
-                 metadata.len() as f64 / 1024.0);
+        println!(
+            "📊 Input file size:  {} bytes ({:.1} KB)",
+            metadata.len(),
+            metadata.len() as f64 / 1024.0
+        );
     }
-    
+
     println!();
 
     if cli.dry_run {
@@ -366,15 +387,17 @@ async fn main() -> Result<()> {
                 println!("✅ All validation checks passed!");
                 println!();
                 println!("🎯 Ready to sign - run without --dry-run to proceed");
-                println!("   Command: yubikey-signer {} -s {} -a {:?}{}", 
-                         cli.input_file.display(),
-                         cli.slot,
-                         config.hash_algorithm,
-                         if config.timestamp_url.is_some() { 
-                             format!(" -t {}", config.timestamp_url.as_ref().unwrap()) 
-                         } else { 
-                             String::new() 
-                         });
+                println!(
+                    "   Command: yubikey-signer {} -s {} -a {:?}{}",
+                    cli.input_file.display(),
+                    cli.slot,
+                    config.hash_algorithm,
+                    if config.timestamp_url.is_some() {
+                        format!(" -t {}", config.timestamp_url.as_ref().unwrap())
+                    } else {
+                        String::new()
+                    }
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -390,7 +413,8 @@ async fn main() -> Result<()> {
     // Perform the signing
     println!("Starting signing process...");
 
-    sign_pe_file(&cli.input_file, &output_file, config).await
+    sign_pe_file(&cli.input_file, &output_file, config)
+        .await
         .into_diagnostic()
         .with_context(|| "Code signing operation failed")?;
 
@@ -412,10 +436,10 @@ async fn main() -> Result<()> {
 fn get_slot_description(slot: u8) -> &'static str {
     match slot {
         0x9a => "Authentication",
-        0x9c => "Digital Signature", 
+        0x9c => "Digital Signature",
         0x9d => "Key Management",
         0x9e => "Card Authentication",
-        _ => "Custom/Unknown"
+        _ => "Custom/Unknown",
     }
 }
 
@@ -423,15 +447,19 @@ fn get_slot_description(slot: u8) -> &'static str {
 fn parse_piv_slot(slot_str: &str) -> Result<u8> {
     let slot = if slot_str.starts_with("0x") || slot_str.starts_with("0X") {
         // Hex format
-        u8::from_str_radix(&slot_str[2..], 16).into_diagnostic()
+        u8::from_str_radix(&slot_str[2..], 16)
+            .into_diagnostic()
             .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
     } else if slot_str.len() == 2 && slot_str.chars().all(|c| c.is_ascii_hexdigit()) {
         // Hex format without prefix
-        u8::from_str_radix(slot_str, 16).into_diagnostic()
+        u8::from_str_radix(slot_str, 16)
+            .into_diagnostic()
             .with_context(|| format!("Invalid hex format in slot '{slot_str}'"))?
     } else {
         // Decimal format
-        slot_str.parse::<u8>().into_diagnostic()
+        slot_str
+            .parse::<u8>()
+            .into_diagnostic()
             .with_context(|| format!("Invalid decimal format in slot '{slot_str}'"))?
     };
 
@@ -439,10 +467,8 @@ fn parse_piv_slot(slot_str: &str) -> Result<u8> {
     match slot {
         0x9a | 0x9c | 0x9d | 0x9e => Ok(slot),
         _ => {
-            log::warn!(
-                "Unusual PIV slot 0x{slot:02x} - common slots are 0x9a, 0x9c, 0x9d, 0x9e"
-            );
-            
+            log::warn!("Unusual PIV slot 0x{slot:02x} - common slots are 0x9a, 0x9c, 0x9d, 0x9e");
+
             // Provide a more helpful error for clearly invalid slots
             if slot > 0x9e {
                 Err(miette::miette!(
@@ -464,15 +490,28 @@ async fn validate_signing_environment(config: &SigningConfig) -> Result<()> {
     // Test YubiKey connection and authentication
     use yubikey_signer::yubikey_ops::YubiKeyOperations;
 
-    let mut yubikey_ops = YubiKeyOperations::connect().into_diagnostic()
+    let mut yubikey_ops = YubiKeyOperations::connect()
+        .into_diagnostic()
         .with_context(|| "Failed to connect to YubiKey")?;
-    yubikey_ops.authenticate(&config.pin).into_diagnostic()
+    yubikey_ops
+        .authenticate(&config.pin)
+        .into_diagnostic()
         .with_context(|| "Failed to authenticate with YubiKey PIN")?;
 
     // Verify certificate exists in slot
-    let _cert = yubikey_ops.get_certificate(config.piv_slot).into_diagnostic()
-        .with_context(|| format!("Failed to read certificate from PIV slot {}", config.piv_slot.description()))?;
-    log::info!("✓ Certificate found in PIV slot {}", config.piv_slot.description());
+    let _cert = yubikey_ops
+        .get_certificate(config.piv_slot)
+        .into_diagnostic()
+        .with_context(|| {
+            format!(
+                "Failed to read certificate from PIV slot {}",
+                config.piv_slot.description()
+            )
+        })?;
+    log::info!(
+        "✓ Certificate found in PIV slot {}",
+        config.piv_slot.description()
+    );
 
     // Test timestamp server if configured
     if let Some(ref timestamp_url) = config.timestamp_url {

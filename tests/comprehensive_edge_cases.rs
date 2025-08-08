@@ -138,7 +138,7 @@ mod yubikey_hardware_tests {
     #[test]
     #[ignore = "Requires YubiKey hardware"]
     fn test_invalid_pin() {
-        let ops = YubiKeyOperations::connect().expect("YubiKey required");
+        let _ops = YubiKeyOperations::connect().expect("YubiKey required");
 
         let invalid_pins = vec![
             "",          // empty
@@ -367,7 +367,6 @@ mod signature_format_tests {
 
 /// Test suite for CLI argument edge cases
 mod cli_argument_tests {
-    
 
     #[test]
     fn test_slot_parsing() {
@@ -551,7 +550,7 @@ mod resource_tests {
     #[test]
     fn test_concurrent_operations() {
         // Test thread safety
-        
+
         use std::thread;
 
         let handles: Vec<_> = (0..10)
@@ -578,6 +577,7 @@ mod resource_tests {
 }
 
 // Helper function to create test PE files
+#[allow(dead_code)]
 fn create_test_pe_file() -> Vec<u8> {
     // Create a minimal valid PE file structure
     let mut pe_data = Vec::new();

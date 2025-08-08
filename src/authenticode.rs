@@ -8,7 +8,7 @@ use x509_cert::Certificate;
 
 /// Authenticode signer for PE files
 pub struct AuthenticodeSigner {
-    certificate: Certificate,
+    _certificate: Certificate,
     hash_algorithm: HashAlgorithm,
 }
 
@@ -16,7 +16,7 @@ impl AuthenticodeSigner {
     /// Create new Authenticode signer
     pub fn new(certificate: Certificate, hash_algorithm: HashAlgorithm) -> Self {
         Self {
-            certificate,
+            _certificate: certificate,
             hash_algorithm,
         }
     }

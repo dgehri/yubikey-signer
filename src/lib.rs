@@ -77,6 +77,10 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
     let file_data = std::fs::read(&input_path)
         .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
 
+    // Validate it's a PE file before accessing hardware, so we fail fast
+    // with a clear PE parsing error on invalid inputs.
+    let _ = pe::parse_pe(&file_data)?;
+
     // Connect to YubiKey and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect()?;
     yubikey_ops.authenticate(&config.pin)?;

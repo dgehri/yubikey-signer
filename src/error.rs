@@ -69,11 +69,10 @@ impl From<goblin::error::Error> for SigningError {
     }
 }
 
-impl From<rsa::Error> for SigningError {
-    fn from(error: rsa::Error) -> Self {
-        SigningError::CryptographicError(error.to_string())
-    }
-}
+// Note: We intentionally avoid depending on the `rsa` crate directly to
+// mitigate audit warnings (RUSTSEC-2023-0071). RSA operations are delegated
+// to the YubiKey hardware via the `yubikey` crate; any crypto errors are
+// reported through higher-level error variants.
 
 #[cfg(test)]
 mod tests {
