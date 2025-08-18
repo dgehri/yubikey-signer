@@ -36,7 +36,7 @@ reqwest = { version = "0.12.22", features = ["rustls-tls", "json"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 
 # Command line interface
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 rpassword = "7.0"
 
 # Error handling
