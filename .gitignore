@@ -56,6 +56,9 @@ test_certs/
 *.crt
 *.key
 
+# Copilot configs
+.github/instructions
+
 # Old directory (already committed, but ignore future additions)
 old/new_*
 old/temp_*
@@ -67,3 +70,11 @@ old/*/bin/*.dll
 old/cert.pem
 old/stunnel/config/ca-certs.pem
 old/stunnel/config/stunnel.pem
+# reference
+temp/
+# But include test files needed for build
+!temp/test_unsigned.exe
+!temp/cert.pem
+TODO.md
+*.p7s
+reference
