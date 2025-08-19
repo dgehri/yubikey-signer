@@ -45,10 +45,10 @@ jobs:
             ### Usage
             ```bash
             # Sign a PE file with your YubiKey
-            yubikey-signer sign --input myapp.exe --output myapp-signed.exe --slot 9c --pin <your-pin>
+            yubikey-signer sign --input myapp.exe --output myapp-signed.exe --pin <your-pin>
 
             # Add timestamp server for enhanced verification
-            yubikey-signer sign --input myapp.exe --output myapp-signed.exe --slot 9c --pin <your-pin> --timestamp-url http://timestamp.digicert.com
+            yubikey-signer sign --input myapp.exe --output myapp-signed.exe --pin <your-pin> --timestamp-url http://timestamp.digicert.com
             ```
 
             ### Requirements
@@ -103,15 +103,42 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libpcsclite-dev
+          sudo apt-get install -y pkg-config libpcsclite-dev
+          # Note: Not installing libssl-dev - we use vendored OpenSSL
 
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install pkg-config openssl pcsc-lite
+          brew install pkg-config pcsc-lite
+          # Note: Not installing openssl - we use vendored OpenSSL
+
+      - name: Setup vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "896bf4e76e2b72f0e4af12d488d455bd41e0dd57" # Latest stable
+
+      - name: Install OpenSSL via vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Set OpenSSL vendored feature (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Windows: Use static vcpkg OpenSSL to avoid DLL dependencies
+            cargo build --release --target ${{ matrix.target }} --features static-openssl
+          else
+            # Linux/macOS: Use vendored OpenSSL
+            cargo build --release --target ${{ matrix.target }} --features vendored-openssl
+          fi
+        shell: bash
 
       - name: Prepare release asset
         shell: bash
@@ -156,7 +183,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libpcsclite-dev
+          sudo apt-get install -y pkg-config libpcsclite-dev
+          # Note: Not installing libssl-dev - we use vendored OpenSSL
+
+      - name: Set OpenSSL environment for publishing
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

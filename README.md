@@ -1,20 +1,101 @@
+
 # YubiKey Signer
 
-A Rust library and CLI tool for code signing PE executables using YubiKey PIV certificates, with support for RFC 3161 timestamping.
+Code signing utility for PE executables using YubiKey PIV certificates with OpenSSL-based Authenticode signatures.
 
-## Features
+## Requirements
 
-- **YubiKey PIV Integration**: Direct communication with YubiKey devices via PIV protocol
-- **Authenticode PE Signing**: Full support for Microsoft Authenticode PE signature format
-- **RFC 3161 Timestamping**: Automatic timestamping with configurable timestamp authorities
-- **Self-Contained**: No external dependencies on Windows SDK or other signing tools
-- **Cross-Platform**: Works on Windows, Linux, and macOS with automated builds
+1. YubiKey with certificate in PIV slot
+2. Windows: PC/SC Smart Card service enabled
+3. Linux: pcscd service running (`sudo systemctl start pcscd`)
+4. macOS: No additional setup required
+
+## Usage
+
+### Basic Signing
+
+Sign a file in-place (replaces the original):
+
+```bash
+yubikey-signer sign myapp.exe
+```
+
+Save signed file to a different location:
+
+```bash
+yubikey-signer sign myapp.exe -o myapp-signed.exe
+```
+
+### Timestamping
+
+With timestamp server:
+
+```bash
+yubikey-signer sign myapp.exe --timestamp http://timestamp.digicert.com
+```
+
+Without timestamping (not recommended for production):
+
+```bash
+yubikey-signer sign myapp.exe --timestamp ""
+```
+
+### PIV Slot Selection
+
+Specify a specific PIV slot:
+
+```bash
+yubikey-signer sign myapp.exe --slot 0x9c
+```
+
+### Discovery
+
+Find suitable certificates on your YubiKey:
+
+```bash
+yubikey-signer discover
+```
+
+Get detailed certificate information:
+
+```bash
+yubikey-signer discover --detailed
+```
+
+### Configuration
+
+View current configuration:
+
+```bash
+yubikey-signer config show
+```
+
+Initialize default configuration:
+
+```bash
+yubikey-signer config init
+```
+
+Set configuration values:
+
+```bash
+yubikey-signer config set default_piv_slot 0x9c
+```
+
+### Authentication
+
+Set PIN via environment variable (recommended):
+
+```bash
+export YUBICO_PIN=123456  # Linux/macOS
+$env:YUBICO_PIN = "123456"  # Windows PowerShell
+```
 
 ## Installation
 
 ### Download Pre-built Binaries
 
-Download the latest release for your platform from the [Releases page](../../releases):
+Download from [GitHub Releases](https://github.com/dgehri/yubikey-signer/releases):
 
 - **Windows**: `yubikey-signer-x86_64-pc-windows-msvc.exe`
 - **Linux**: `yubikey-signer-x86_64-unknown-linux-gnu`
@@ -23,105 +104,106 @@ Download the latest release for your platform from the [Releases page](../../rel
 
 ### Build from Source
 
-```bash
-# Prerequisites
-- YubiKey with PIV-enabled firmware
-- Valid code signing certificate loaded in PIV slot (typically 0x9c)
-- Rust toolchain (1.70+)
+#### Windows (Recommended: Automatic Setup)
 
-# Clone and build
-git clone <repository>
-cd yubikey-signer
+```powershell
+# Run the automated setup script (PowerShell as Administrator)
+.\setup-windows-build.ps1
+
+# Or use the batch file
+.\setup-windows-build.bat
+
+# Then build normally
+cargo build --release
+```
+
+The setup script will automatically:
+
+- Install vcpkg if not present (respects existing `VCPKG_ROOT`)
+- Install OpenSSL via vcpkg
+- Configure the build environment
+
+#### Manual Windows Setup
+
+If you already have vcpkg:
+
+```bash
+# Install OpenSSL via your existing vcpkg
+vcpkg install openssl:x64-windows
+
+# Set environment variable (if not already set)
+set VCPKG_ROOT=C:\your\vcpkg\path
+
+# Build normally
+cargo build --release
+```
+
+#### Linux/macOS
+
+```bash
+# Uses system OpenSSL or vendored if system not available
 cargo build --release
 
-# The binary will be available at target/release/yubikey-signer
+# Force vendored OpenSSL (requires dependencies)
+cargo build --release --features vendored-openssl
 ```
 
-## Quick Start
+## Verification
 
-```bash
-# Sign a PE file with PIN prompt
-yubikey-signer sign --input myapp.exe --output myapp-signed.exe --slot 9c
+**Windows PowerShell** (optional):
 
-# Sign with timestamp server (recommended for production)
-yubikey-signer sign --input myapp.exe --output myapp-signed.exe --slot 9c --timestamp-url http://timestamp.digicert.com
-
-# Sign with PIN from environment variable (secure)
-export YUBICO_PIN="123456"
-yubikey-signer sign --input myapp.exe --output myapp-signed.exe --slot 9c
-
-# Get help with valid options
-yubikey-signer sign --help
-
-# Verify system is ready
-yubikey-signer --version
-```
-
-## Library Usage
-
-```rust
-use yubikey_signer::{
-    sign_pe_file, 
-    types::{PivSlot, PivPin, TimestampUrl, SecurePath, HashData},
-    error::SigningError
-};
-
-#[tokio::main]
-async fn main() -> Result<(), SigningError> {
-    // Type-safe parameter construction with validation
-    let input = SecurePath::new("myapp.exe")?;
-    let output = SecurePath::new("myapp_signed.exe")?;
-    let slot = PivSlot::DigitalSignature; // 0x9c
-    let pin = PivPin::new("123456")?;
-    let timestamp_url = TimestampUrl::new("http://timestamp.digicert.com")?;
-    
-    // Sign the PE file
-    sign_pe_file(
-        &input,
-        &output,
-        slot,
-        &pin,
-        Some(&timestamp_url)
-    ).await?;
-    
-    println!("PE file signed successfully");
-    Ok(())
-}
+```powershell
+Get-AuthenticodeSignature myapp-signed.exe
 ```
 
 ## Command Line Interface
 
-```bash
-yubikey-signer sign [OPTIONS]
+The CLI provides three main commands:
+
+- `sign` - Sign PE executables with YubiKey certificates
+- `discover` - Find and analyze certificates on your YubiKey  
+- `config` - Manage application configuration
+
+### Sign Command
+
+```text
+yubikey-signer sign [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  PE executable file to sign
 
 Options:
-  -i, --input <INPUT>                Input PE file to sign [required]
-  -o, --output <OUTPUT>              Output signed PE file [required]
-  -s, --slot <SLOT>                  PIV slot containing the signing certificate
-                                     [default: 9c] [possible values: 9a, 9c, 9d, 9e]
-  -p, --pin <PIN>                    PIV PIN (alternatively use YUBICO_PIN env var)
-  -t, --timestamp-url <URL>          RFC 3161 timestamp server URL
-                                     Examples: http://timestamp.digicert.com,
-                                              http://ts.ssl.com,
-                                              http://timestamp.comodoca.com
-  -a, --hash-algorithm <ALGORITHM>   Hash algorithm for signing
-                                     [default: sha256] [possible values: sha256, sha384, sha512]
-  -v, --verbose                      Enable verbose output
-  -h, --help                         Print help information
-  -V, --version                      Print version information
+  -o, --output <FILE>       Output file (default: sign in-place)
+  -s, --slot <SLOT>         PIV slot (hex: 0x9c, 9c, or decimal: 156)
+  -t, --timestamp [<URL>]   Timestamp server URL (default: http://ts.ssl.com)
+      --dry-run             Preview signing without making changes
+  -v, --verbose             Enable verbose output
+  -h, --help                Print help
+```
 
-Global Options:
-      --color <WHEN>                 When to use colors [default: auto] [possible values: always, auto, never]
+### Discover Command
 
-Examples:
-  # Basic signing with PIN prompt
-  yubikey-signer sign -i app.exe -o app-signed.exe -s 9c
+```text
+yubikey-signer discover [OPTIONS]
 
-  # With timestamp server (recommended)
-  yubikey-signer sign -i app.exe -o app-signed.exe -s 9c -t http://timestamp.digicert.com
+Options:
+      --detailed   Show detailed certificate information
+  -v, --verbose    Enable verbose output  
+  -h, --help       Print help
+```
 
-  # Using environment variable for PIN (secure)
-  YUBICO_PIN=123456 yubikey-signer sign -i app.exe -o app-signed.exe -s 9c
+### Config Command
+
+```text
+yubikey-signer config <SUBCOMMAND>
+
+Subcommands:
+  show      Display current configuration
+  init      Create default configuration file
+  set       Set configuration value
+  export    Export configuration
+  import    Import configuration
+  help      Print help
 ```
 
 ## PIV Slots
@@ -129,6 +211,54 @@ Examples:
 Common YubiKey PIV slots for code signing:
 
 - `0x9c` (156): Digital Signature - Primary slot for code signing
-- `0x9a` (154): Authentication - Can be used for signing
+- `0x9a` (154): Authentication - Can be used for signing  
 - `0x9d` (157): Key Management - Alternative signing slot
 - `0x9e` (158): Card Authentication - Alternative signing slot
+
+## CI and Release
+
+CI builds and releases are tested for:
+
+- `x86_64-pc-windows-msvc`
+- `x86_64-unknown-linux-gnu`
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+
+## Security & License Compliance
+
+Automated dependency scanning and license compliance is handled by `cargo-deny`, configured via `deny.toml`.
+
+### Run Locally
+
+```bash
+cargo install cargo-deny
+
+# Complete dependency compliance check (licenses, advisories, bans, sources)
+cargo deny check
+
+# Individual checks
+cargo deny check licenses
+cargo deny check advisories  
+cargo deny check bans
+cargo deny check sources
+```
+
+Ignored advisories are documented with justification and expiry inside `deny.toml`. Remove or update entries once upstream crates patch vulnerabilities.
+
+CI GitHub Actions workflow runs these checks on pushes, pull requests, and a daily schedule; any new unignored vulnerability or disallowed license will fail the workflow.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the `LICENSE` file for details.
+
+### Third-Party Components
+
+This software includes third-party components under their respective licenses:
+
+- **OpenSSL** (when using `--use-openssl` option): Apache License 2.0
+  - Full license text in `LICENSE-OpenSSL`
+  - Copyright and attribution notices in `THIRD-PARTY-NOTICES.md`
+- **Other Rust dependencies**: Various permissive licenses
+  - Run `cargo license` for a complete list
+
+See `THIRD-PARTY-NOTICES.md` for complete attribution and license information for all third-party components.

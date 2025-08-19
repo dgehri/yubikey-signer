@@ -1,4 +1,4 @@
-//! Comprehensive edge case tests for YubiKey PE Signer
+//! Comprehensive edge case tests for `YubiKey` PE Signer
 //!
 //! This test suite covers all edge cases and error conditions to en            Ok(_) => println!("YubiKey connected");ure
 //! robust production behavior.
@@ -6,9 +6,10 @@
 use std::env;
 use std::path::Path;
 use tempfile::NamedTempFile;
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
 #[cfg(feature = "network-tests")]
-use yubikey_signer::types::TimestampUrl;
-use yubikey_signer::types::{PivPin, PivSlot};
+use yubikey_signer::TimestampUrl;
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, YubiKeyOperations};
 
 /// Test suite for input validation edge cases
@@ -101,8 +102,9 @@ mod input_validation_tests {
     }
 
     fn create_test_config() -> SigningConfig {
+        let pin_str = std::env::var("YUBICO_PIN").unwrap_or_else(|_| "123456".to_string());
         SigningConfig {
-            pin: PivPin::new("123456").expect("Valid PIN format"),
+            pin: PivPin::new(&pin_str).expect("Valid PIN format"),
             piv_slot: PivSlot::new(0x9c).expect("Valid slot"),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
@@ -117,10 +119,10 @@ mod input_validation_tests {
     }
 }
 
-/// Test suite for YubiKey hardware edge cases
+/// Test suite for `YubiKey` hardware edge cases
 mod yubikey_hardware_tests {
     use super::*;
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
+    use yubikey_signer::YubiKeyOperations;
 
     #[test]
     fn test_yubikey_not_connected() {
@@ -189,18 +191,15 @@ mod yubikey_hardware_tests {
 
         for slot_num in invalid_slots {
             // Test slot creation
-            match PivSlot::new(slot_num) {
-                Ok(slot) => {
-                    let result = ops.get_certificate(slot);
-                    // Should fail gracefully for invalid slots
-                    if result.is_err() {
-                        let error_msg = format!("{}", result.unwrap_err());
-                        assert!(error_msg.contains("slot") || error_msg.contains("certificate"));
-                    }
+            if let Ok(slot) = PivSlot::new(slot_num) {
+                let result = ops.get_certificate(slot);
+                // Should fail gracefully for invalid slots
+                if result.is_err() {
+                    let error_msg = format!("{}", result.unwrap_err());
+                    assert!(error_msg.contains("slot") || error_msg.contains("certificate"));
                 }
-                Err(_) => {
-                    // Invalid slot number - this is expected behavior
-                }
+            } else {
+                // Invalid slot number - this is expected behavior
             }
         }
     }
@@ -249,7 +248,7 @@ mod yubikey_hardware_tests {
 /// Test suite for signature format edge cases  
 mod signature_format_tests {
     use super::*;
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
+    use yubikey_signer::YubiKeyOperations;
 
     #[test]
     #[ignore = "Requires YubiKey hardware"]
@@ -463,8 +462,9 @@ mod network_tests {
 
     #[tokio::test]
     async fn test_invalid_timestamp_urls() {
+        let pin_str = std::env::var("YUBICO_PIN").unwrap_or_else(|_| "123456".to_string());
         let config_base = SigningConfig {
-            pin: PivPin::new("123456").unwrap(),
+            pin: PivPin::new(&pin_str).unwrap(),
             piv_slot: PivSlot::new(0x9c).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
@@ -482,8 +482,7 @@ mod network_tests {
             let result = TimestampUrl::new(url);
             assert!(
                 result.is_err(),
-                "URL {} should be rejected during validation",
-                url
+                "URL {url} should be rejected during validation"
             );
             println!(
                 "Security validation correctly rejected {}: {:?}",
@@ -509,7 +508,7 @@ mod network_tests {
             // Should fail gracefully with network error, not crash
             assert!(result.is_err());
             let error_msg = format!("{}", result.unwrap_err());
-            println!("Network error for {}: {}", url, error_msg);
+            println!("Network error for {url}: {error_msg}");
         }
     }
 
@@ -534,8 +533,7 @@ mod network_tests {
         // Should timeout before 30 seconds
         assert!(
             duration.as_secs() < 25,
-            "Should timeout quickly, took {:?}",
-            duration
+            "Should timeout quickly, took {duration:?}"
         );
         assert!(result.is_err());
     }
@@ -555,14 +553,11 @@ mod resource_tests {
             let result = YubiKeyOperations::connect();
 
             // Should fail gracefully without leaking resources
-            match result {
-                Ok(_) => {
-                    // If we actually connect, that's fine too
-                    println!("Connected on iteration {i}");
-                }
-                Err(_) => {
-                    // Expected without hardware
-                }
+            if result.is_ok() {
+                // If we actually connect, that's fine too
+                println!("Connected on iteration {i}");
+            } else {
+                // Expected without hardware
             }
         }
 

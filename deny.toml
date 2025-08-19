@@ -1,0 +1,59 @@
+############################################################
+# Cargo Deny Configuration
+# Purpose: Enforce allowed license set and flag insecure deps.
+# Scope: Minimal allowlist suitable for typical Rust ecosystem
+# while remaining permissive for widely-used crates.
+#
+# Run locally:
+#   cargo install cargo-deny
+#   cargo deny check licenses
+#   cargo deny check advisories
+#   cargo deny check bans
+#
+# Note: Primary security scanning remains via cargo-audit using
+# audit.toml. We mirror the advisory ignore here to keep outputs
+# consistent if advisories check is run.
+############################################################
+
+[graph]
+# Speed up by pruning dev dependencies in license/advisory checks
+all-features = false
+no-default-features = false
+features = []
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Justification: RSA operations are performed on hardware (YubiKey PIV) via the
+    # `yubikey` crate; we don't use software RSA decryption that would be affected
+    # by the Marvin timing side-channel. We monitor upstream for a fixed release.
+    "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2021-0145, RUSTSEC-2024-0375: atty is unmaintained but widely used in ecosystem.
+    # Replacement (std::io::IsTerminal) requires Rust 1.70+. Risk is minimal in practice.
+    "RUSTSEC-2021-0145",
+    "RUSTSEC-2024-0375",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    # Unicode Consortium licenses for international text processing
+    "Unicode-3.0",
+    # Community Data License for certificate data
+    "CDLA-Permissive-2.0",
+]
+
+[[licenses.clarify]]
+name = "ring"
+# ring includes code with multiple licenses; treat overall as permissive.
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
+[bans]
+multiple-versions = "allow"

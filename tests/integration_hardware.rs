@@ -1,11 +1,14 @@
-//! Hardware integration tests for YubiKey functionality
+//! Hardware integration tests for `YubiKey` functionality
 //!
-//! These tests require an actual YubiKey to be connected and the YUBICO_PIN environment variable to be set.
-//! Run with: cargo test --test integration_hardware -- --ignored
+//! These tests require an actual `YubiKey` to be connected and the `YUBICO_PIN` environment variable to be set.
+//! Run with: cargo test --test `integration_hardware` -- --ignored
 
 use std::env;
 use tempfile::NamedTempFile;
-use yubikey_signer::types::*;
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
+use yubikey_signer::TimestampUrl;
+use yubikey_signer::YubiKeyOperations;
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig};
 
 #[tokio::test]
@@ -37,7 +40,7 @@ async fn test_real_yubikey_connection_and_certificate_retrieval() {
     let result = sign_pe_file(&input_path, &output_path, config).await;
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             println!("SUCCESS: Real YubiKey signing worked!");
             // Clean up
             let _ = std::fs::remove_file(&output_path);
@@ -71,13 +74,12 @@ async fn test_yubikey_certificate_matches_file() {
     let pin = PivPin::new(&pin_str).expect("PIN should be valid");
 
     // Test just the YubiKey operations directly
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
 
     let mut ops = YubiKeyOperations::connect().expect("YubiKey connection failed");
-    
+
     // Try authentication, but handle hardware connectivity issues gracefully
     match ops.authenticate(&pin) {
-        Ok(_) => {
+        Ok(()) => {
             println!("YubiKey authentication successful");
         }
         Err(e) => {
@@ -152,7 +154,7 @@ async fn test_yubikey_certificate_matches_file() {
 #[ignore = "Requires YubiKey hardware"]
 fn test_yubikey_basic_connection() {
     // Most basic test - can we connect to the YubiKey at all?
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
+    use yubikey_signer::YubiKeyOperations;
 
     let result = YubiKeyOperations::connect();
 
@@ -171,9 +173,7 @@ fn test_yubikey_basic_connection() {
             }
         }
         Err(e) => {
-            panic!(
-                "Failed to connect to YubiKey: {e}. Is YubiKey plugged in?"
-            );
+            panic!("Failed to connect to YubiKey: {e}. Is YubiKey plugged in?");
         }
     }
 }

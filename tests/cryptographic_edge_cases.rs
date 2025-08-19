@@ -4,8 +4,10 @@
 
 use std::env;
 use tempfile::NamedTempFile;
-use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
-use yubikey_signer::yubikey_ops::YubiKeyOperations;
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
+use yubikey_signer::TimestampUrl;
+use yubikey_signer::YubiKeyOperations;
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig};
 
 /// Test suite for certificate handling edge cases
@@ -212,7 +214,7 @@ mod algorithm_tests {
                     tokio_test::block_on(sign_pe_file(temp_file_obj.path(), &output_path, config));
 
                 match result {
-                    Ok(_) => {
+                    Ok(()) => {
                         println!("  {:?} + slot 0x{:02x} succeeded", hash_alg, *slot);
                         let _ = std::fs::remove_file(&output_path);
                     }
@@ -262,9 +264,7 @@ mod signature_format_tests {
             let first_len = signatures[0].len();
             let all_same_length = signatures.iter().all(|s| s.len() == first_len);
             assert!(all_same_length, "Signature lengths should be consistent");
-            println!(
-                "All signatures have consistent length: {first_len} bytes"
-            );
+            println!("All signatures have consistent length: {first_len} bytes");
 
             // For RSA, signatures of the same data should be identical
             // For ECDSA, they will be different due to randomness
@@ -394,7 +394,7 @@ mod error_handling_tests {
         // The test should not crash, regardless of how many connections succeed
         // Some YubiKey implementations may allow multiple connections, others may not
         println!("Concurrent access test completed without crashes");
-        assert!(true, "Test completed successfully - no crashes occurred");
+        // Test completed successfully - no crashes occurred
     }
 
     #[test]
@@ -460,7 +460,7 @@ mod real_world_tests {
         println!("Realistic signing took: {duration:?}");
 
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 println!("Realistic workflow succeeded");
 
                 // Check output file exists and has reasonable size

@@ -1,4 +1,36 @@
-//! Enhanced YubiKey PE Signer CLI with all improvements
+// Copyright 2025 Daniel Gehriger
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    clippy::struct_excessive_bools,
+    clippy::too_many_lines,
+    clippy::match_same_arms,
+    clippy::unused_async,
+    clippy::missing_panics_doc,
+    clippy::unnecessary_debug_formatting,
+    clippy::no_effect_underscore_binding,
+    clippy::needless_range_loop,
+    clippy::float_cmp,
+    clippy::items_after_statements,
+    clippy::manual_let_else
+)]
 //!
 //! Command-line interface with certificate validation, auto-detection,
 //! multiple timestamp servers, progress indicators, and configuration support.
@@ -7,11 +39,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 use std::path::PathBuf;
 use yubikey_signer::{
-    auto_detect::AutoDetection,
-    config::{ConfigManager, ExportFormat},
-    error::SigningError,
-    progress::ProgressStyle,
-    signing::{Signer, SigningOptions},
+    infra::config::{ConfigManager, ExportFormat},
+    infra::error::SigningError,
+    pipelines::sign::SignWorkflow,
+    services::auto_detect::AutoDetection,
     HashAlgorithm, PivPin, PivSlot, SigningConfig, TimestampUrl,
 };
 
@@ -19,23 +50,29 @@ use yubikey_signer::{
 #[command(name = "yubikey-signer")]
 #[command(about = "Enhanced PE code signing with YubiKey PIV certificates")]
 #[command(long_about = "
-YubiKey PE Signer - Code signing utility with advanced features
+YubiKey PE Signer - Simple code signing utility
 
 EXAMPLES:
-    # Basic signing (auto-detects best certificate)
+    # Sign in-place (default behavior)
     yubikey-signer sign myapp.exe
 
-    # Sign with specific slot and progress bar
-    yubikey-signer sign myapp.exe -s 9c --progress bar
+    # Sign to different output file
+    yubikey-signer sign myapp.exe -o myapp-signed.exe
+
+    # Sign with specific slot
+    yubikey-signer sign myapp.exe -s 9c
+
+    # Sign with timestamp
+    yubikey-signer sign myapp.exe -t http://timestamp.digicert.com
+
+    # Sign with default timestamp server
+    yubikey-signer sign myapp.exe -t
 
     # Discover available certificates
     yubikey-signer discover
 
-    # Create configuration profile
-    yubikey-signer config create-profile development
-
-    # Test timestamp servers
-    yubikey-signer test-timestamps
+    # Dry run to validate configuration
+    yubikey-signer sign myapp.exe --dry-run
 
 SLOT REFERENCE:
     9a = Authentication (default - most certificates stored here)
@@ -43,9 +80,10 @@ SLOT REFERENCE:
     9d = Key Management (encryption, sometimes signing)
     9e = Card Authentication (PIV authentication)
 
+    Valid formats: 0x9a, 9a, 154 (all refer to the same slot)
+
 ENVIRONMENT VARIABLES:
     YUBICO_PIN      YubiKey PIN (required)
-    RUST_LOG        Logging level (debug, info, warn, error)
 ")]
 #[command(version)]
 struct Cli {
@@ -55,7 +93,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Sign a PE file with enhanced features
+    /// Sign a PE file
     Sign {
         /// PE file to sign (.exe, .dll, .sys, etc.)
         #[arg(value_name = "INPUT_FILE")]
@@ -65,37 +103,13 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT_FILE")]
         output: Option<PathBuf>,
 
-        /// PIV slot to use for signing
-        #[arg(short, long, value_name = "SLOT_ID", default_value = "9a")]
+        /// PIV slot to use for signing (hex: 0x9a, 9a; decimal: 154)
+        #[arg(short, long, value_name = "SLOT", default_value = "9a")]
         slot: String,
 
-        /// Timestamp server URL (overrides config)
-        #[arg(short, long, value_name = "URL")]
-        timestamp_url: Option<String>,
-
-        /// Hash algorithm to use
-        #[arg(long, value_enum, default_value = "sha256")]
-        hash: HashAlgorithmArg,
-
-        /// Progress indicator style
-        #[arg(long, value_enum)]
-        progress: Option<ProgressStyleArg>,
-
-        /// Disable progress indicators
-        #[arg(long)]
-        no_progress: bool,
-
-        /// Skip certificate validation
-        #[arg(long)]
-        skip_validation: bool,
-
-        /// Disable auto-detection fallback
-        #[arg(long)]
-        no_auto_detect: bool,
-
-        /// Use basic timestamp client (disable enhanced features)
-        #[arg(long)]
-        basic_timestamps: bool,
+        /// Timestamp server URL (use without value for default server)
+        #[arg(short, long, value_name = "URL", num_args = 0..=1, default_missing_value = "http://ts.ssl.com")]
+        timestamp: Option<String>,
 
         /// Dry run - validate configuration without signing
         #[arg(long)]
@@ -106,24 +120,13 @@ enum Commands {
         verbose: bool,
     },
 
-    /// Discover available YubiKey certificates and slots
+    /// Discover available `YubiKey` certificates and slots
     Discover {
         /// Show detailed certificate information
         #[arg(short, long)]
         detailed: bool,
 
-        /// Test signing capability (requires PIN)
-        #[arg(short, long)]
-        test_signing: bool,
-    },
-
-    /// Test timestamp server connectivity
-    TestTimestamps {
-        /// Test specific server URL
-        #[arg(short, long)]
-        url: Option<String>,
-
-        /// Show response details
+        /// Verbose output
         #[arg(short, long)]
         verbose: bool,
     },
@@ -131,17 +134,6 @@ enum Commands {
     /// Configuration management
     #[command(subcommand)]
     Config(ConfigCommands),
-
-    /// Verify signature of a signed PE file (uses PowerShell Get-AuthenticodeSignature)
-    Verify {
-        /// Signed PE file to verify
-        #[arg(value_name = "SIGNED_FILE")]
-        file: PathBuf,
-
-        /// Show detailed signature information
-        #[arg(short, long)]
-        verbose: bool,
-    },
 }
 
 #[derive(Subcommand)]
@@ -178,60 +170,6 @@ enum ConfigCommands {
         #[arg(short, long, value_enum, default_value = "toml")]
         format: ExportFormatArg,
     },
-
-    /// Create a configuration profile
-    CreateProfile {
-        /// Profile name
-        name: String,
-        /// Profile description
-        #[arg(short, long)]
-        description: Option<String>,
-    },
-
-    /// List available profiles
-    ListProfiles,
-
-    /// Load a configuration profile
-    LoadProfile {
-        /// Profile name
-        name: String,
-    },
-}
-
-#[derive(ValueEnum, Clone)]
-enum HashAlgorithmArg {
-    Sha256,
-    Sha384,
-    Sha512,
-}
-
-impl From<HashAlgorithmArg> for HashAlgorithm {
-    fn from(arg: HashAlgorithmArg) -> Self {
-        match arg {
-            HashAlgorithmArg::Sha256 => HashAlgorithm::Sha256,
-            HashAlgorithmArg::Sha384 => HashAlgorithm::Sha384,
-            HashAlgorithmArg::Sha512 => HashAlgorithm::Sha512,
-        }
-    }
-}
-
-#[derive(ValueEnum, Clone)]
-enum ProgressStyleArg {
-    Percentage,
-    Bar,
-    Spinner,
-    Silent,
-}
-
-impl From<ProgressStyleArg> for ProgressStyle {
-    fn from(arg: ProgressStyleArg) -> Self {
-        match arg {
-            ProgressStyleArg::Percentage => ProgressStyle::Percentage,
-            ProgressStyleArg::Bar => ProgressStyle::ProgressBar,
-            ProgressStyleArg::Spinner => ProgressStyle::Spinner,
-            ProgressStyleArg::Silent => ProgressStyle::Silent,
-        }
-    }
 }
 
 #[derive(ValueEnum, Clone)]
@@ -256,36 +194,29 @@ struct SignCommandArgs {
     input_file: PathBuf,
     output: Option<PathBuf>,
     slot: String,
-    timestamp_url: Option<String>,
-    hash: HashAlgorithmArg,
-    progress: Option<ProgressStyleArg>,
-    no_progress: bool,
-    skip_validation: bool,
-    no_auto_detect: bool,
-    basic_timestamps: bool,
+    timestamp: Option<String>,
     dry_run: bool,
     verbose: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let cli = Cli::parse();
+
+    // Initialize logging based on verbose flag
+    let log_level = match &cli.command {
+        Commands::Sign { verbose, .. } | Commands::Discover { verbose, .. } if *verbose => "debug",
+        _ => "off", // No logging by default for clean output
+    };
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     match cli.command {
         Commands::Sign {
             input_file,
             output,
             slot,
-            timestamp_url,
-            hash,
-            progress,
-            no_progress,
-            skip_validation,
-            no_auto_detect,
-            basic_timestamps,
+            timestamp,
             dry_run,
             verbose,
         } => {
@@ -293,36 +224,19 @@ async fn main() -> Result<()> {
                 input_file,
                 output,
                 slot,
-                timestamp_url,
-                hash,
-                progress,
-                no_progress,
-                skip_validation,
-                no_auto_detect,
-                basic_timestamps,
+                timestamp,
                 dry_run,
                 verbose,
             };
             handle_sign_command(args).await?;
         }
 
-        Commands::Discover {
-            detailed,
-            test_signing,
-        } => {
-            handle_discover_command(detailed, test_signing).await?;
-        }
-
-        Commands::TestTimestamps { url, verbose } => {
-            handle_test_timestamps_command(url, verbose).await?;
+        Commands::Discover { detailed, verbose } => {
+            handle_discover_command(detailed, verbose).await?;
         }
 
         Commands::Config(config_cmd) => {
             handle_config_command(config_cmd).await?;
-        }
-
-        Commands::Verify { file, verbose } => {
-            handle_verify_command(file, verbose).await?;
         }
     }
 
@@ -340,116 +254,65 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
         .into_diagnostic()
         .context("Invalid PIV slot")?;
 
-    // Determine output path
+    // Determine output path - default to in-place
     let output_path = args.output.unwrap_or_else(|| args.input_file.clone());
 
-    // Build signing configuration
-    let mut options = if let Ok(_signer) = Signer::from_config_file() {
-        if args.verbose {
-            println!("📋 Loaded configuration from file");
-        }
-        // Override with command line arguments
-        // Create enhanced signing options
-        let mut opts = SigningOptions::default();
-        opts.config.pin = PivPin::new(pin).into_diagnostic()?;
-        opts.config.piv_slot = piv_slot;
-        opts.config.hash_algorithm = args.hash.into();
-        opts.verbose = args.verbose;
-        opts
-    } else {
-        // Create default options
-        let signing_config = SigningConfig {
-            pin: PivPin::new(pin).into_diagnostic()?,
-            piv_slot,
-            timestamp_url: args
-                .timestamp_url
-                .as_ref()
-                .map(|url| TimestampUrl::new(url.clone()).into_diagnostic())
-                .transpose()?,
-            hash_algorithm: args.hash.into(),
-            embed_certificate: true,
-        };
-
-        SigningOptions {
-            config: signing_config,
-            show_progress: !args.no_progress,
-            progress_style: args.progress.map(|p| p.into()),
-            validate_certificate: !args.skip_validation,
-            auto_detect_fallback: !args.no_auto_detect,
-            use_enhanced_timestamps: !args.basic_timestamps,
-            timestamp_config: None,
-            verbose: args.verbose,
-        }
+    // Build simple signing configuration
+    let signing_config = SigningConfig {
+        pin: PivPin::new(pin).into_diagnostic()?,
+        piv_slot,
+        timestamp_url: args
+            .timestamp
+            .map(TimestampUrl::new)
+            .transpose()
+            .into_diagnostic()?,
+        hash_algorithm: HashAlgorithm::Sha256, // Auto-detected, this is just a default
+        embed_certificate: true,
     };
-
-    // Override timestamp URL if provided
-    if let Some(url) = &args.timestamp_url {
-        options.config.timestamp_url = Some(TimestampUrl::new(url.clone()).into_diagnostic()?);
-    }
 
     if args.dry_run {
         println!("🔍 Dry run mode - validating configuration");
         println!("  Input file: {}", args.input_file.display());
         println!("  Output file: {}", output_path.display());
-        println!("  PIV slot: {}", options.config.piv_slot);
-        println!(
-            "  Hash algorithm: {}",
-            options.config.hash_algorithm.as_str()
-        );
-        if let Some(ts_url) = &options.config.timestamp_url {
-            println!("  Timestamp URL: {}", ts_url.as_str());
+        println!("  PIV slot: {}", signing_config.piv_slot);
+        if let Some(ref ts_url) = signing_config.timestamp_url {
+            println!("  Timestamp server: {}", ts_url.as_str());
+        } else {
+            println!("  Timestamp: disabled");
         }
-        println!(
-            "  Certificate validation: {}",
-            if options.validate_certificate {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        );
-        println!(
-            "  Auto-detection: {}",
-            if options.auto_detect_fallback {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        );
         println!("✅ Configuration is valid");
         return Ok(());
     }
 
-    // Perform the signing
-    let signer = Signer::new(options);
+    if args.verbose {
+        println!(
+            "🔐 Signing {} with YubiKey slot {}",
+            args.input_file.display(),
+            signing_config.piv_slot
+        );
+    }
 
-    match signer.sign_pe_file(&args.input_file, &output_path).await {
-        Ok(result) => {
+    let start_time = std::time::Instant::now();
+
+    // Use high-level Signer pipeline (handles signature-bytes timestamp correctly)
+    let workflow = SignWorkflow::new(signing_config.hash_algorithm);
+    let config_clone = signing_config.clone();
+    match workflow
+        .sign_pe_file(&args.input_file, &output_path, signing_config)
+        .await
+    {
+        Ok(()) => {
+            let duration = start_time.elapsed();
             println!("✅ File signed successfully!");
-            println!("  Duration: {:.2}s", result.duration.as_secs_f64());
-            println!("  File size: {} bytes", result.file_size);
-            println!("  Slot used: {}", result.slot_used);
-
-            if let Some(ref server) = result.timestamp_server_used {
-                println!("  Timestamp server: {server}");
-            }
-
-            if !result.warnings.is_empty() {
-                println!("\n⚠️  Warnings:");
-                for warning in &result.warnings {
-                    println!("  - {warning}");
-                }
-            }
-
             if args.verbose {
-                if let Some(ref analysis) = result.certificate_analysis {
-                    println!("\n📜 Certificate Analysis:");
-                    println!("  Subject: {}", analysis.subject);
-                    println!("  Issuer: {}", analysis.issuer);
-                    println!("  Days until expiry: {}", analysis.days_until_expiry);
-                    println!(
-                        "  Code signing suitable: {}",
-                        analysis.is_code_signing_suitable
-                    );
+                println!("  Duration: {:.2}s", duration.as_secs_f64());
+                let file_size = std::fs::metadata(&output_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                println!("  File size: {file_size} bytes");
+                println!("  Slot used: {}", config_clone.piv_slot);
+                if let Some(ref ts_url) = config_clone.timestamp_url {
+                    println!("  Timestamp server: {}", ts_url.as_str());
                 }
             }
         }
@@ -462,26 +325,20 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     Ok(())
 }
 
-async fn handle_discover_command(detailed: bool, test_signing: bool) -> Result<()> {
-    println!("🔍 Discovering YubiKey certificates and capabilities...");
+async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
+    if verbose {
+        println!("🔍 Discovering YubiKey certificates and capabilities...");
+    }
 
     // Check if YUBICO_PIN is set for authentication
-    let pin = if test_signing {
-        Some(
-            std::env::var("YUBICO_PIN")
-                .into_diagnostic()
-                .context("YUBICO_PIN environment variable required for testing")?,
-        )
-    } else {
-        std::env::var("YUBICO_PIN").ok()
-    };
-
-    // Connect to YubiKey
-    let mut yubikey_ops = yubikey_signer::YubiKeyOperations::connect()
-        .into_diagnostic()
-        .context("Failed to connect to YubiKey")?;
+    let pin = std::env::var("YUBICO_PIN").ok();
 
     if let Some(pin_str) = pin {
+        // Connect to YubiKey
+        let mut yubikey_ops = yubikey_signer::YubiKeyOperations::connect()
+            .into_diagnostic()
+            .context("Failed to connect to YubiKey")?;
+
         let piv_pin = PivPin::new(pin_str).into_diagnostic()?;
         yubikey_ops
             .authenticate(&piv_pin)
@@ -493,7 +350,7 @@ async fn handle_discover_command(detailed: bool, test_signing: bool) -> Result<(
             .into_diagnostic()
             .context("Failed to discover YubiKey capabilities")?;
 
-        println!("\n📊 Discovery Results:");
+        println!("📊 Discovery Results:");
         println!(
             "  Total certificates found: {}",
             discovery.certificate_count
@@ -540,7 +397,7 @@ async fn handle_discover_command(detailed: bool, test_signing: bool) -> Result<(
             }
         }
 
-        if !discovery.warnings.is_empty() {
+        if !discovery.warnings.is_empty() && verbose {
             println!("\n⚠️  Discovery Warnings:");
             for warning in &discovery.warnings {
                 println!("  - {warning}");
@@ -555,50 +412,6 @@ async fn handle_discover_command(detailed: bool, test_signing: bool) -> Result<(
         for &slot_id in &slots {
             let slot = PivSlot::new(slot_id).unwrap();
             println!("  Slot {slot}: Present (authentication required for analysis)");
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_test_timestamps_command(url: Option<String>, verbose: bool) -> Result<()> {
-    println!("🌐 Testing timestamp server connectivity...");
-
-    if let Some(url) = url {
-        // Test specific URL
-        let timestamp_url = TimestampUrl::new(url).into_diagnostic()?;
-        let client = yubikey_signer::timestamp::TimestampClient::new(&timestamp_url);
-
-        print!("Testing {}: ", timestamp_url.as_str());
-
-        let test_data = b"timestamp_connectivity_test";
-        match client.get_timestamp(test_data).await {
-            Ok(_) => println!("✅ Success"),
-            Err(e) => {
-                println!("❌ Failed");
-                if verbose {
-                    println!("  Error: {e}");
-                }
-            }
-        }
-    } else {
-        // Test all configured servers
-        let client = yubikey_signer::timestamp::TimestampClient::default();
-        let results = client.test_server_connectivity().await;
-
-        println!("\n📊 Server Connectivity Results:");
-        for (server, reachable, error) in results {
-            print!("  {server}: ");
-            if reachable {
-                println!("✅ Reachable");
-            } else {
-                println!("❌ Failed");
-                if verbose {
-                    if let Some(err) = error {
-                        println!("    Error: {err}");
-                    }
-                }
-            }
         }
     }
 
@@ -670,70 +483,6 @@ async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
                 .into_diagnostic()?;
             println!("✅ Configuration imported from: {}", file.display());
         }
-
-        ConfigCommands::CreateProfile {
-            name: _,
-            description: _,
-        } => {
-            // This would require profile manager implementation
-            println!("📁 Profile management not yet implemented in this demo");
-        }
-
-        ConfigCommands::ListProfiles => {
-            println!("📁 Profile management not yet implemented in this demo");
-        }
-
-        ConfigCommands::LoadProfile { name: _ } => {
-            println!("📁 Profile management not yet implemented in this demo");
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_verify_command(file: PathBuf, verbose: bool) -> Result<()> {
-    println!("🔍 Verifying signature using PowerShell Get-AuthenticodeSignature...");
-
-    // Build PowerShell command
-    let script_path = std::env::current_exe()
-        .into_diagnostic()?
-        .parent()
-        .unwrap()
-        .join("scripts")
-        .join("verify_signature.ps1");
-
-    if !script_path.exists() {
-        println!(
-            "❌ Verification script not found: {}",
-            script_path.display()
-        );
-        println!(
-            "   You can manually verify using: Get-AuthenticodeSignature '{}'",
-            file.display()
-        );
-        return Ok(());
-    }
-
-    let mut cmd = std::process::Command::new("pwsh");
-    cmd.arg("-ExecutionPolicy")
-        .arg("Bypass")
-        .arg("-File")
-        .arg(&script_path)
-        .arg("-FilePath")
-        .arg(&file);
-
-    if verbose {
-        cmd.arg("-Verbose");
-    }
-
-    let output = cmd.output().into_diagnostic()?;
-
-    if output.status.success() {
-        println!("{}", String::from_utf8_lossy(&output.stdout));
-    } else {
-        eprintln!("❌ Verification failed:");
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        std::process::exit(1);
     }
 
     Ok(())

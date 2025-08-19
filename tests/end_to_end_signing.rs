@@ -1,12 +1,16 @@
 //! End-to-End Signing Integration Tests
 //!
-//! These tests validate the complete signing workflow with real YubiKey hardware
-//! and real PE files. Run with: cargo test --test end_to_end_signing -- --include-ignored
+//! These tests validate the complete signing workflow with real `YubiKey` hardware
+//! and real PE files. Run with: cargo test --test `end_to_end_signing` -- --include-ignored
 
 use std::env;
 use std::fs;
 use tempfile::NamedTempFile;
-use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
+use yubikey_signer::SignWorkflow;
+use yubikey_signer::TimestampUrl;
+use yubikey_signer::YubiKeyOperations;
 use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig};
 
 #[tokio::test]
@@ -39,7 +43,7 @@ async fn test_complete_signing_workflow() {
     let result = sign_pe_file(input_path, output_path.to_str().unwrap(), config).await;
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             println!("Complete signing workflow succeeded");
 
             // Verify the output file was created and has content
@@ -104,7 +108,7 @@ async fn test_signing_without_timestamp() {
     let result = sign_pe_file(input_path, output_path.to_str().unwrap(), config).await;
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             println!("Signing without timestamp succeeded");
         }
         Err(e) => {
@@ -129,9 +133,6 @@ async fn test_signing_validation_only() {
         embed_certificate: true,
     };
 
-    // We'll test just the validation components that should work
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
-
     // Test YubiKey connection
     let mut yubikey_ops = YubiKeyOperations::connect().expect("Should connect to YubiKey");
     yubikey_ops.authenticate(&pin).expect("Should authenticate");
@@ -142,4 +143,11 @@ async fn test_signing_validation_only() {
         .expect("Should get certificate");
 
     println!("Validation components working");
+}
+
+#[test]
+fn sign_workflow_construction_only() {
+    // Simple construction test (no hardware access)
+    let wf = SignWorkflow::new(HashAlgorithm::Sha256);
+    assert_eq!(wf.hash_algorithm().as_str(), "sha256");
 }
