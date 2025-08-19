@@ -387,8 +387,7 @@ mod cli_argument_tests {
 
         for slot_str in invalid_slots {
             let parsed = u8::from_str_radix(slot_str, 16);
-            if parsed.is_ok() {
-                let slot_value = parsed.unwrap();
+            if let Ok(slot_value) = parsed {
                 // Even if it parses, it should be outside valid PIV range
                 assert!(
                     !(0x9a..=0x9e).contains(&slot_value),
