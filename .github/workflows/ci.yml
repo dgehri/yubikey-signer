@@ -32,6 +32,12 @@ jobs:
           # Cache key differentiator
           key: test-${{ runner.os }}
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkgconf libpcsclite-dev
+          # Note: Not installing libssl-dev - we use vendored OpenSSL
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
