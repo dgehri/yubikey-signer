@@ -42,7 +42,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::too_many_lines
 
       - name: Run tests
         run: cargo test --verbose --features vendored-openssl

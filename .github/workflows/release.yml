@@ -1,8 +1,6 @@
-name: CI & Release
+name: Release
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -15,33 +13,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  pr-checks:
-    name: PR Quality Gates
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libpcsclite-dev
-      - name: Format check
-        run: cargo fmt --all -- --check
-      - name: Clippy (strict)
-        run: |
-          cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::too_many_lines
-      - name: Tests
-        run: cargo test --all --all-features
-      - name: Cargo deny (advisories / licenses)
-        run: cargo deny check
-      - name: Dry run publish (verifies package)
-        run: cargo publish --dry-run
-
   prepare-release:
     name: Prepare Release Metadata
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -79,7 +52,7 @@ jobs:
           git push origin v${{ needs.prepare-release.outputs.version }}
 
   build-release:
-    name: Build Artifacts (${{ matrix.target }})
+    name: Build Release Artifacts
     runs-on: ${{ matrix.os }}
     needs: [prepare-release, create-tag]
     if: needs.prepare-release.outputs.should_release == 'true'
