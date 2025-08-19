@@ -35,7 +35,7 @@ fn pkcs7_service_vs_authenticode_parity() {
     };
 
     let algo = HashAlgorithm::Sha256;
-    let pe_bytes = include_bytes!("../temp/test_unsigned.exe");
+    let pe_bytes = include_bytes!("../test-data/test_unsigned.exe");
     let hasher = PeHasher::new(algo);
     let pe_digest = hasher.hash(pe_bytes).expect("hash");
 

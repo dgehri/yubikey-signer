@@ -100,6 +100,7 @@ jobs:
 
       - name: Setup vcpkg (Windows)
         if: matrix.os == 'windows-latest'
+        id: runvcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: "ee0973d8090e4e3e452244bb50d34c25fe907dc2" # Latest stable (2025-08-18)
@@ -108,7 +109,15 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           vcpkg install openssl:x64-windows
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          echo "VCPKG_ROOT=${{ steps.runvcpkg.outputs.RUNVCPKG_VCPKG_ROOT_OUT }}" >> $env:GITHUB_ENV
+
+      - name: Set OpenSSL environment variables (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $vcpkg_root = "${{ steps.runvcpkg.outputs.RUNVCPKG_VCPKG_ROOT_OUT }}"
+          echo "OPENSSL_DIR=$vcpkg_root\installed\x64-windows" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=$vcpkg_root\installed\x64-windows\lib" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=$vcpkg_root\installed\x64-windows\include" >> $env:GITHUB_ENV
 
       - name: Set OpenSSL vendored feature (Linux/macOS)
         if: matrix.os != 'windows-latest'

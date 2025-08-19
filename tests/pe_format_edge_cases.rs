@@ -380,7 +380,7 @@ fn create_pe_with_overlapping_sections() -> Vec<u8> {
 
 #[test]
 fn pe_hasher_parity_with_authenticode_signer() {
-    let path = "temp/test_unsigned.exe";
+    let path = "test-data/test_unsigned.exe";
     if let Ok(bytes) = std::fs::read(path) {
         let hasher = PeHasher::new(HashAlgorithm::Sha256);
         let digest1 = hasher.hash(&bytes).expect("PeHasher should hash");
@@ -395,13 +395,13 @@ fn pe_hasher_parity_with_authenticode_signer() {
             "PeHasher digest mismatch with AuthenticodeSigner path"
         );
     } else {
-        eprintln!("Skipping parity test; missing temp/test_unsigned.exe");
+        eprintln!("Skipping parity test; missing test-data/test_unsigned.exe");
     }
 }
 
 #[test]
 fn spc_builder_parity() {
-    let path = "temp/test_unsigned.exe";
+    let path = "test-data/test_unsigned.exe";
     if let Ok(bytes) = std::fs::read(path) {
         let hasher = PeHasher::new(HashAlgorithm::Sha256);
         let pe_digest = match hasher.hash(&bytes) {
@@ -424,13 +424,13 @@ fn spc_builder_parity() {
             "SPC DER mismatch between service and AuthenticodeSigner"
         );
     } else {
-        eprintln!("Skipping SPC parity test; missing temp/test_unsigned.exe");
+        eprintln!("Skipping SPC parity test; missing test-data/test_unsigned.exe");
     }
 }
 
 #[test]
 fn signed_attributes_builder_parity() {
-    let path = "temp/test_unsigned.exe";
+    let path = "test-data/test_unsigned.exe";
     if let Ok(bytes) = std::fs::read(path) {
         let signer = OpenSslAuthenticodeSigner::new_placeholder_for_hash(HashAlgorithm::Sha256)
             .expect("test signer");

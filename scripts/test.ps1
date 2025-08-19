@@ -9,7 +9,6 @@
     2. Signs it without timestamp using yubikey-signer
     3. Signs it with timestamp using yubikey-signer  
     4. Verifies Windows accepts both signatures
-    5. Compares against reference osslsigncode signatures
 
 .PARAMETER SkipYubiKey
     Skip actual YubiKey signing operations (for testing when hardware not connected)
@@ -81,10 +80,10 @@ function New-TestExecutable {
     
     Write-TestStatus "Creating test executable: $OutputPath"
     
-    # Use reference clean executable as base
-    $referenceExe = "reference\clean_unsigned.exe"
+    # Use test-data executable as base
+    $referenceExe = "test-data\test_unsigned.exe"
     if (-not (Test-Path $referenceExe)) {
-        throw "Reference executable not found: $referenceExe"
+        throw "Test executable not found: $referenceExe"
     }
     
     Copy-Item $referenceExe $OutputPath -Force

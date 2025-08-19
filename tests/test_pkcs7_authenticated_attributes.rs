@@ -10,7 +10,7 @@ fn test_pkcs7_structure_with_authenticated_attributes() {
     env_logger::try_init().ok();
 
     // Load the reference certificate DER
-    let cert_pem = include_str!("../temp/cert.pem");
+    let cert_pem = include_str!("../test-data/cert.pem");
     let cert_der = pem_to_der(cert_pem);
 
     // Create the signer
