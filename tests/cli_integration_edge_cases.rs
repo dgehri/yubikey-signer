@@ -602,16 +602,16 @@ mod unix_specific_tests {
         ];
 
         for path in unix_paths {
-            println!("Testing Unix path: {}", path);
+            println!("Testing Unix path: {path}");
 
             let path_obj = std::path::Path::new(path);
 
             if let Some(parent) = path_obj.parent() {
-                println!("  Parent: {:?}", parent);
+                println!("  Parent: {parent:?}");
             }
 
             if let Some(filename) = path_obj.file_name() {
-                println!("  Filename: {:?}", filename);
+                println!("  Filename: {filename:?}");
             }
         }
     }
@@ -630,7 +630,7 @@ mod unix_specific_tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = metadata.permissions().mode();
-            println!("Unix file mode: 0{:o}", mode);
+            println!("Unix file mode: 0{mode:o}");
         }
     }
 }

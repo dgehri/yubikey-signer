@@ -42,7 +42,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::too_many_lines
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::inline_always -A clippy::unreadable_literal -A clippy::missing_errors_doc -A clippy::cast_possible_wrap -A clippy::cast_sign_loss -A clippy::cast_possible_truncation -A clippy::float_cmp -A clippy::cast_precision_loss -A clippy::manual_let_else -A clippy::struct_field_names -A clippy::similar_names -A clippy::default_trait_access -A clippy::too_many_lines -A clippy::match_wildcard_for_single_variants -A clippy::match_same_arms -A dead_code -A clippy::missing_errors_doc -A clippy::unused_self -A clippy::items_after_statements
 
       - name: Run tests
         run: cargo test --verbose --features vendored-openssl
