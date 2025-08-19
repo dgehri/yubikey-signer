@@ -1,7 +1,7 @@
-//! Test YubiKey PIV signing with different data formats
+//! Test `YubiKey` PIV signing with different data formats
 
 use std::env;
-use yubikey_signer::{yubikey_ops::YubiKeyOperations, types::{PivPin, PivSlot}};
+use yubikey_signer::{PivPin, PivSlot, YubiKeyOperations};
 
 #[test]
 #[ignore = "Requires YubiKey hardware"]
@@ -35,7 +35,7 @@ fn test_yubikey_signing_formats() {
                 println!("  Success! Signature: {} bytes", signature.len());
             }
             Err(e) => {
-                println!("  Failed: {}", e);
+                println!("  Failed: {e}");
             }
         }
     }

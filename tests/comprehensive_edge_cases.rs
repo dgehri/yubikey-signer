@@ -1,14 +1,16 @@
-//! Comprehensive edge case tests for YubiKey PE Signer
+//! Comprehensive edge case tests for `YubiKey` PE Signer
 //!
 //! This test suite covers all edge cases and error conditions to en            Ok(_) => println!("YubiKey connected");ure
 //! robust production behavior.
 
 use std::env;
-use std::fs;
 use std::path::Path;
-use tempfile::{NamedTempFile, TempDir};
-use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
-use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, SigningError, YubiKeyOperations};
+use tempfile::NamedTempFile;
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
+#[cfg(feature = "network-tests")]
+use yubikey_signer::TimestampUrl;
+use yubikey_signer::{sign_pe_file, HashAlgorithm, SigningConfig, YubiKeyOperations};
 
 /// Test suite for input validation edge cases
 mod input_validation_tests {
@@ -100,8 +102,9 @@ mod input_validation_tests {
     }
 
     fn create_test_config() -> SigningConfig {
+        let pin_str = std::env::var("YUBICO_PIN").unwrap_or_else(|_| "123456".to_string());
         SigningConfig {
-            pin: PivPin::new("123456").expect("Valid PIN format"),
+            pin: PivPin::new(&pin_str).expect("Valid PIN format"),
             piv_slot: PivSlot::new(0x9c).expect("Valid slot"),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
@@ -116,10 +119,10 @@ mod input_validation_tests {
     }
 }
 
-/// Test suite for YubiKey hardware edge cases
+/// Test suite for `YubiKey` hardware edge cases
 mod yubikey_hardware_tests {
     use super::*;
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
+    use yubikey_signer::YubiKeyOperations;
 
     #[test]
     fn test_yubikey_not_connected() {
@@ -130,7 +133,7 @@ mod yubikey_hardware_tests {
         match result {
             Ok(_) => println!("YubiKey connected"),
             Err(e) => {
-                let error_msg = format!("{}", e);
+                let error_msg = format!("{e}");
                 assert!(error_msg.contains("YubiKey") || error_msg.contains("connect"));
             }
         }
@@ -139,7 +142,7 @@ mod yubikey_hardware_tests {
     #[test]
     #[ignore = "Requires YubiKey hardware"]
     fn test_invalid_pin() {
-        let mut ops = YubiKeyOperations::connect().expect("YubiKey required");
+        let _ops = YubiKeyOperations::connect().expect("YubiKey required");
 
         let invalid_pins = vec![
             "",          // empty
@@ -153,7 +156,7 @@ mod yubikey_hardware_tests {
         for pin_str in invalid_pins {
             // Test that PivPin creation fails for invalid formats
             let pin_result = PivPin::new(pin_str);
-            assert!(pin_result.is_err(), "PIN '{}' should be invalid", pin_str);
+            assert!(pin_result.is_err(), "PIN '{pin_str}' should be invalid");
         }
     }
 
@@ -188,18 +191,15 @@ mod yubikey_hardware_tests {
 
         for slot_num in invalid_slots {
             // Test slot creation
-            match PivSlot::new(slot_num) {
-                Ok(slot) => {
-                    let result = ops.get_certificate(slot);
-                    // Should fail gracefully for invalid slots
-                    if result.is_err() {
-                        let error_msg = format!("{}", result.unwrap_err());
-                        assert!(error_msg.contains("slot") || error_msg.contains("certificate"));
-                    }
+            if let Ok(slot) = PivSlot::new(slot_num) {
+                let result = ops.get_certificate(slot);
+                // Should fail gracefully for invalid slots
+                if result.is_err() {
+                    let error_msg = format!("{}", result.unwrap_err());
+                    assert!(error_msg.contains("slot") || error_msg.contains("certificate"));
                 }
-                Err(_) => {
-                    // Invalid slot number - this is expected behavior
-                }
+            } else {
+                // Invalid slot number - this is expected behavior
             }
         }
     }
@@ -219,9 +219,9 @@ mod yubikey_hardware_tests {
             let slot = PivSlot::new(slot_num).expect("Valid slot");
             let result = ops.get_certificate(slot);
             match result {
-                Ok(_) => println!("Slot 0x{:02x} has certificate", slot_num),
+                Ok(_) => println!("Slot 0x{slot_num:02x} has certificate"),
                 Err(e) => {
-                    let error_msg = format!("{}", e);
+                    let error_msg = format!("{e}");
                     // Should fail gracefully for empty slots
                     assert!(error_msg.contains("certificate") || error_msg.contains("slot"));
                 }
@@ -248,7 +248,7 @@ mod yubikey_hardware_tests {
 /// Test suite for signature format edge cases  
 mod signature_format_tests {
     use super::*;
-    use yubikey_signer::yubikey_ops::YubiKeyOperations;
+    use yubikey_signer::YubiKeyOperations;
 
     #[test]
     #[ignore = "Requires YubiKey hardware"]
@@ -285,7 +285,7 @@ mod signature_format_tests {
                     assert!(!signature.is_empty());
                 }
                 Err(e) => {
-                    println!("  Failed: {}", e);
+                    println!("  Failed: {e}");
                     // Document which sizes fail for different algorithms
                 }
             }
@@ -317,7 +317,7 @@ mod signature_format_tests {
                     println!("  {} works: {} byte signature", name, signature.len());
                 }
                 Err(e) => {
-                    println!("  {} failed: {}", name, e);
+                    println!("  {name} failed: {e}");
                 }
             }
         }
@@ -344,12 +344,12 @@ mod signature_format_tests {
             ("Sequential", (0..32).map(|i| i as u8).collect()),
             (
                 "Random pattern",
-                vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0].repeat(4),
+                [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0].repeat(4),
             ),
         ];
 
         for (name, hash) in test_cases {
-            println!("Testing malformed hash: {}", name);
+            println!("Testing malformed hash: {name}");
 
             let slot = PivSlot::new(0x9a).expect("Valid slot");
             let result = ops.sign_hash(&hash, slot);
@@ -359,7 +359,7 @@ mod signature_format_tests {
                     assert!(!signature.is_empty());
                 }
                 Err(e) => {
-                    println!("  Failed (expected): {}", e);
+                    println!("  Failed (expected): {e}");
                 }
             }
         }
@@ -368,7 +368,6 @@ mod signature_format_tests {
 
 /// Test suite for CLI argument edge cases
 mod cli_argument_tests {
-    use super::*;
 
     #[test]
     fn test_slot_parsing() {
@@ -378,12 +377,11 @@ mod cli_argument_tests {
 
         for slot_str in valid_slots {
             let parsed = u8::from_str_radix(slot_str, 16);
-            assert!(parsed.is_ok(), "Slot '{}' should parse", slot_str);
+            assert!(parsed.is_ok(), "Slot '{slot_str}' should parse");
             let slot_value = parsed.unwrap();
             assert!(
-                slot_value >= 0x9a && slot_value <= 0x9e,
-                "Slot 0x{:02x} should be in valid range",
-                slot_value
+                (0x9a..=0x9e).contains(&slot_value),
+                "Slot 0x{slot_value:02x} should be in valid range"
             );
         }
 
@@ -393,9 +391,8 @@ mod cli_argument_tests {
                 let slot_value = parsed.unwrap();
                 // Even if it parses, it should be outside valid PIV range
                 assert!(
-                    slot_value < 0x9a || slot_value > 0x9e,
-                    "Slot '{}' should be invalid",
-                    slot_str
+                    !(0x9a..=0x9e).contains(&slot_value),
+                    "Slot '{slot_str}' should be invalid"
                 );
             }
         }
@@ -407,11 +404,11 @@ mod cli_argument_tests {
         let invalid_pins = vec!["", "1", "12345", "123456789", "abcdef", "12345a"];
 
         for pin in valid_pins {
-            assert!(is_valid_pin(pin), "PIN '{}' should be valid", pin);
+            assert!(is_valid_pin(pin), "PIN '{pin}' should be valid");
         }
 
         for pin in invalid_pins {
-            assert!(!is_valid_pin(pin), "PIN '{}' should be invalid", pin);
+            assert!(!is_valid_pin(pin), "PIN '{pin}' should be invalid");
         }
     }
 
@@ -439,8 +436,7 @@ mod cli_argument_tests {
         for url in valid_urls {
             assert!(
                 is_reasonable_timestamp_url(url),
-                "URL '{}' should be reasonable",
-                url
+                "URL '{url}' should be reasonable"
             );
         }
 
@@ -466,24 +462,44 @@ mod network_tests {
 
     #[tokio::test]
     async fn test_invalid_timestamp_urls() {
+        let pin_str = std::env::var("YUBICO_PIN").unwrap_or_else(|_| "123456".to_string());
         let config_base = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9c,
+            pin: PivPin::new(&pin_str).unwrap(),
+            piv_slot: PivSlot::new(0x9c).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
         };
 
-        let invalid_urls = vec![
-            "http://definitely-does-not-exist.invalid",
+        // Test URLs that should be rejected during validation
+        let blocked_urls = vec![
             "https://127.0.0.1:99999/timestamp",
             "http://localhost:1/invalid",
+        ];
+
+        for url in blocked_urls {
+            // These should fail at TimestampUrl creation due to security validation
+            let result = TimestampUrl::new(url);
+            assert!(
+                result.is_err(),
+                "URL {url} should be rejected during validation"
+            );
+            println!(
+                "Security validation correctly rejected {}: {:?}",
+                url,
+                result.unwrap_err()
+            );
+        }
+
+        // Test URLs that pass validation but should fail with network errors
+        let network_fail_urls = vec![
+            "http://definitely-does-not-exist.invalid",
             "https://expired-ssl-cert.example.com",
         ];
 
-        for url in invalid_urls {
+        for url in network_fail_urls {
             let mut config = config_base.clone();
-            config.timestamp_url = Some(url.to_string());
+            config.timestamp_url = Some(TimestampUrl::new(url).unwrap());
 
             let temp_file = NamedTempFile::new().unwrap();
             let output_path = temp_file.path().with_extension("signed.exe");
@@ -492,7 +508,7 @@ mod network_tests {
             // Should fail gracefully with network error, not crash
             assert!(result.is_err());
             let error_msg = format!("{}", result.unwrap_err());
-            println!("Network error for {}: {}", url, error_msg);
+            println!("Network error for {url}: {error_msg}");
         }
     }
 
@@ -500,10 +516,10 @@ mod network_tests {
     async fn test_slow_timestamp_server() {
         // Test timeout handling
         let config = SigningConfig {
-            pin: "123456".to_string(),
-            piv_slot: 0x9c,
+            pin: PivPin::new("123456").unwrap(),
+            piv_slot: PivSlot::new(0x9c).unwrap(),
             hash_algorithm: HashAlgorithm::Sha256,
-            timestamp_url: Some("http://httpstat.us/200?sleep=30000".to_string()), // 30 second delay
+            timestamp_url: Some(TimestampUrl::new("http://httpstat.us/200?sleep=30000").unwrap()), // 30 second delay
             embed_certificate: true,
         };
 
@@ -517,8 +533,7 @@ mod network_tests {
         // Should timeout before 30 seconds
         assert!(
             duration.as_secs() < 25,
-            "Should timeout quickly, took {:?}",
-            duration
+            "Should timeout quickly, took {duration:?}"
         );
         assert!(result.is_err());
     }
@@ -538,14 +553,11 @@ mod resource_tests {
             let result = YubiKeyOperations::connect();
 
             // Should fail gracefully without leaking resources
-            match result {
-                Ok(_) => {
-                    // If we actually connect, that's fine too
-                    println!("Connected on iteration {}", i);
-                }
-                Err(_) => {
-                    // Expected without hardware
-                }
+            if result.is_ok() {
+                // If we actually connect, that's fine too
+                println!("Connected on iteration {i}");
+            } else {
+                // Expected without hardware
             }
         }
 
@@ -555,7 +567,7 @@ mod resource_tests {
     #[test]
     fn test_concurrent_operations() {
         // Test thread safety
-        use std::sync::Arc;
+
         use std::thread;
 
         let handles: Vec<_> = (0..10)
@@ -582,6 +594,7 @@ mod resource_tests {
 }
 
 // Helper function to create test PE files
+#[allow(dead_code)]
 fn create_test_pe_file() -> Vec<u8> {
     // Create a minimal valid PE file structure
     let mut pe_data = Vec::new();

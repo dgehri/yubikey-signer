@@ -56,6 +56,9 @@ test_certs/
 *.crt
 *.key
 
+# Copilot configs
+.github/instructions
+
 # Old directory (already committed, but ignore future additions)
 old/new_*
 old/temp_*
@@ -67,3 +70,15 @@ old/*/bin/*.dll
 old/cert.pem
 old/stunnel/config/ca-certs.pem
 old/stunnel/config/stunnel.pem
+# reference
+temp
+TODO.md
+*.p7s
+reference/osslsigncode/.git.backup
+reference/osslsigncode/.github
+reference/osslsigncode/tests
+reference/osslsigncode/misc
+reference/osslsigncode-2.8-windows-x64-mingw
+reference/Yubico PIV Tool
+reference/stunnel
+reference/osslsigncode/build_agent

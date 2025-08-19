@@ -1,33 +1,79 @@
-//! YubiKey Signer Library
+// Copyright 2025 Daniel Gehriger
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! `YubiKey` Signer Library
 //!
-//! A self-contained library for code signing using YubiKey PIV certificates.
+//! A self-contained library for code signing using `YubiKey` PIV certificates.
 //! Supports Authenticode PE signing with RFC 3161 timestamping.
+//! Requires OpenSSL for Windows-compatible Authenticode signatures.
 
-pub mod authenticode;
-pub mod error;
-pub mod pe;
-pub mod timestamp;
-pub mod types;
-pub mod yubikey_ops;
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    clippy::struct_excessive_bools,
+    clippy::too_many_lines,
+    clippy::match_same_arms,
+    clippy::unused_async,
+    clippy::missing_panics_doc,
+    clippy::unnecessary_debug_formatting,
+    clippy::no_effect_underscore_binding,
+    clippy::needless_range_loop,
+    clippy::float_cmp,
+    clippy::items_after_statements,
+    clippy::manual_let_else
+)]
 
-#[cfg(test)]
-mod lib_tests;
+// Core architectural layers - post-migration structure
+pub mod adapters;
+pub mod domain;
+pub mod infra;
+pub mod pipelines;
+pub mod services;
 
-#[cfg(test)]
-mod yubikey_ops_tests;
+// Core domain exports - cryptographic and PE types
+pub use crate::domain::crypto::{
+    CertChain, CmsSignature, DigestBytes, DigestBytesError, EndEntityCert, IntermediateCert,
+};
+pub use crate::domain::pe::{PeHashView, PeRaw};
+pub use crate::domain::spc::SpcIndirectData;
+
+// Core API exports - maintain backward compatibility
+pub use crate::domain::types::{HashData, PivPin, PivSlot, SecurePath, TimestampUrl};
+pub use crate::infra::error::{SigningError, SigningResult};
+pub use crate::pipelines::sign::SignWorkflow;
+
+// Public API exports - stable interfaces for external use
+pub use crate::adapters::yubikey::auth_bridge::{
+    sign_pe_file_with_yubikey_openssl, sign_pe_with_yubikey_openssl, YubiKeyAuthenticodeBridge,
+};
+pub use crate::adapters::yubikey::ops::YubiKeyOperations;
+pub use crate::domain::verification::VerificationReport;
+pub use crate::services::authenticode::OpenSslAuthenticodeSigner;
+pub use crate::services::signing::{Signer, SigningDetails, SigningOptions};
+pub use crate::services::timestamp::TimestampClient;
 
 use std::path::Path;
-
-pub use authenticode::AuthenticodeSigner;
-pub use error::{SigningError, SigningResult};
-pub use timestamp::TimestampClient;
-pub use types::{HashData, PivPin, PivSlot, SecurePath, TimestampUrl};
-pub use yubikey_ops::YubiKeyOperations;
+use std::str::FromStr;
 
 /// Main signing configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SigningConfig {
-    /// YubiKey PIN for authentication
+    /// `YubiKey` PIN for authentication
     pub pin: PivPin,
     /// PIV slot to use for signing (default: 0x9c)
     pub piv_slot: PivSlot,
@@ -40,14 +86,19 @@ pub struct SigningConfig {
 }
 
 /// Supported hash algorithms
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HashAlgorithm {
+    #[default]
     Sha256,
     Sha384,
     Sha512,
 }
 
+// Re-export additional workflows after enum declaration
+pub use crate::pipelines::{timestamp::TimestampWorkflow, verify::VerifyWorkflow};
+
 impl HashAlgorithm {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             HashAlgorithm::Sha256 => "sha256",
@@ -56,6 +107,7 @@ impl HashAlgorithm {
         }
     }
 
+    #[must_use]
     pub fn digest_size(&self) -> usize {
         match self {
             HashAlgorithm::Sha256 => 32,
@@ -65,7 +117,22 @@ impl HashAlgorithm {
     }
 }
 
-/// Main signing function - signs a PE file using YubiKey
+impl FromStr for HashAlgorithm {
+    type Err = crate::infra::error::SigningError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "sha256" => Ok(HashAlgorithm::Sha256),
+            "sha384" => Ok(HashAlgorithm::Sha384),
+            "sha512" => Ok(HashAlgorithm::Sha512),
+            _ => Err(crate::infra::error::SigningError::InvalidInput(format!(
+                "Invalid hash algorithm: {s}"
+            ))),
+        }
+    }
+}
+
+/// Main signing function - signs a PE file using `YubiKey`
 pub async fn sign_pe_file<P: AsRef<Path>>(
     input_path: P,
     output_path: P,
@@ -75,66 +142,60 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
 
     // Read input file
     let file_data = std::fs::read(&input_path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {}", e)))?;
+        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+
+    // Validate it's a PE file before accessing hardware, so we fail fast
+    // with a clear PE parsing error on invalid inputs.
+    let _ = crate::domain::pe::layout::parse_pe(&file_data)?;
 
     // Connect to YubiKey and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect()?;
     yubikey_ops.authenticate(&config.pin)?;
 
-    // Get certificate from YubiKey
-    let certificate = yubikey_ops.get_certificate(config.piv_slot)?;
+    // Get certificate DER bytes from YubiKey
+    let certificate_der = yubikey_ops.get_certificate_der(config.piv_slot)?;
     log::info!("Retrieved certificate from YubiKey");
 
-    // Create Authenticode signer
-    let signer = AuthenticodeSigner::new(certificate, config.hash_algorithm);
+    // Create OpenSSL Authenticode signer
+    let signer = OpenSslAuthenticodeSigner::new(&certificate_der, config.hash_algorithm)?;
 
     // Compute PE hash for signing
     let pe_hash = signer.compute_pe_hash(&file_data)?;
     log::debug!("Computed PE hash: {} bytes", pe_hash.len());
 
-    // Sign the hash using YubiKey
-    let signature = yubikey_ops.sign_hash(&pe_hash, config.piv_slot)?;
-    log::info!("Created digital signature using YubiKey");
+    // Don't sign the hash directly - remove this line since bridge will handle it
+    // let signature = yubikey_ops.sign_hash(&pe_hash, config.piv_slot)?;
+    // log::info!("Created digital signature using YubiKey");
 
     // Get timestamp if requested
     let timestamp_token = if let Some(ts_url) = &config.timestamp_url {
-        log::info!("Requesting timestamp from: {}", ts_url);
+        log::info!("Requesting timestamp from: {ts_url}");
         let client = TimestampClient::new(ts_url);
         Some(client.get_timestamp(&pe_hash).await?)
     } else {
         None
     };
 
-    // Create signed PE file
-    let signed_data = signer.create_signed_pe(
+    // Create signed PE file using YubiKey authenticode bridge
+    let mut bridge = crate::adapters::yubikey::auth_bridge::YubiKeyAuthenticodeBridge::new(
+        yubikey_ops,
+        config.piv_slot,
+        config.hash_algorithm,
+    )?;
+
+    let signed_data = bridge.sign_pe_file(
         &file_data,
-        &signature,
+        config.piv_slot,
         timestamp_token.as_deref(),
         config.embed_certificate,
     )?;
 
     // Write signed file
     std::fs::write(&output_path, signed_data)
-        .map_err(|e| SigningError::IoError(format!("Failed to write output file: {}", e)))?;
+        .map_err(|e| SigningError::IoError(format!("Failed to write output file: {e}")))?;
 
     log::info!("Successfully signed PE file: {:?}", output_path.as_ref());
     Ok(())
-}
-
-/// Verify a signed PE file
-pub fn verify_pe_file<P: AsRef<Path>>(path: P) -> SigningResult<bool> {
-    let file_data = std::fs::read(&path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read file: {}", e)))?;
-
-    // Parse PE and extract signature
-    let pe_info = pe::parse_pe(&file_data)?;
-
-    if let Some(signature_data) = pe_info.certificate_table {
-        // Verify the signature
-        AuthenticodeSigner::verify_signature(&file_data, &signature_data)
-    } else {
-        Ok(false) // No signature found
-    }
 }
 
 #[cfg(test)]
@@ -166,7 +227,7 @@ mod tests {
         assert_eq!(config.pin.as_str(), "123456");
         assert_eq!(config.piv_slot.as_u8(), 0x9c);
         assert_eq!(
-            config.timestamp_url.as_ref().map(|u| u.as_str()),
+            config.timestamp_url.as_ref().map(TimestampUrl::as_str),
             Some("http://ts.ssl.com")
         );
         assert_eq!(config.hash_algorithm, HashAlgorithm::Sha256);

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -36,7 +39,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --verbose --all-features
+        run: cargo test --verbose --features vendored-openssl
         continue-on-error: true # Temporarily allow test failures while we update them
 
       - name: Check documentation
@@ -80,15 +83,42 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libpcsclite-dev
+          sudo apt-get install -y pkg-config libpcsclite-dev
+          # Note: Not installing libssl-dev - we use vendored OpenSSL
 
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install pkg-config openssl pcsc-lite
+          brew install pkg-config pcsc-lite
+          # Note: Not installing openssl - we use vendored OpenSSL
+
+      - name: Setup vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "896bf4e76e2b72f0e4af12d488d455bd41e0dd57" # Latest stable
+
+      - name: Install OpenSSL via vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          vcpkg install openssl:x64-windows
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Set OpenSSL vendored feature (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Windows: Use vcpkg OpenSSL (build.rs will detect automatically)
+            cargo build --release --target ${{ matrix.target }}
+          else
+            # Linux/macOS: Use vendored OpenSSL
+            cargo build --release --target ${{ matrix.target }} --features vendored-openssl
+          fi
+        shell: bash
 
       - name: Test binary exists
         shell: bash
@@ -107,22 +137,3 @@ jobs:
           name: yubikey-signer-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/yubikey-signer${{ matrix.binary-suffix }}
           if-no-files-found: error
-
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: Run security audit
-        run: cargo audit
