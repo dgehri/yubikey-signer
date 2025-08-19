@@ -116,7 +116,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "896bf4e76e2b72f0e4af12d488d455bd41e0dd57" # Latest stable
+          vcpkgGitCommitId: "ee0973d8090e4e3e452244bb50d34c25fe907dc2" # Latest stable (2025-08-18)
 
       - name: Install OpenSSL via vcpkg (Windows)
         if: matrix.os == 'windows-latest'
