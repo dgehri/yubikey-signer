@@ -109,14 +109,14 @@ impl TimestampRequestBuilder {
         };
 
         // hashAlgorithm: SEQUENCE { OID, NULL }
-        let mut alg_id = vec![
+        let mut algorithm_identifier = vec![
             ASN1_SEQUENCE_TAG,   // SEQUENCE
             2 + 1 + alg_oid_len, // length: OID hdr + NULL
             ASN1_OID_TAG,        // OID
             alg_oid_len,
         ];
-        alg_id.extend_from_slice(alg_oid);
-        alg_id.extend_from_slice(ASN1_NULL); // NULL
+        algorithm_identifier.extend_from_slice(alg_oid);
+        algorithm_identifier.extend_from_slice(ASN1_NULL); // NULL
 
         // messageImprint SEQUENCE
         let mut message_imprint = Vec::new();
@@ -125,7 +125,7 @@ impl TimestampRequestBuilder {
         let mi_len_pos = message_imprint.len();
         message_imprint.push(0x00);
         // hashAlgorithm
-        message_imprint.extend_from_slice(&alg_id);
+        message_imprint.extend_from_slice(&algorithm_identifier);
         // hashedMessage OCTET STRING
         message_imprint.push(ASN1_OCTET_STRING_TAG);
         if signature_hash.len() > 255 {

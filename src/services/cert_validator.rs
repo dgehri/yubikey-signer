@@ -262,7 +262,15 @@ impl CertificateValidator {
             .unwrap_or_default()
             .as_secs();
         if let Some(expiry_secs) = Self::parse_asn1_time(&not_after_der) {
-            let days_remaining = ((expiry_secs.saturating_sub(current_secs)) / 86400) as i64;
+            let days_remaining = if expiry_secs >= current_secs {
+                // Certificate is still valid - safely convert to i64
+                let remaining_days = (expiry_secs - current_secs) / 86400;
+                i64::try_from(remaining_days).unwrap_or(i64::MAX)
+            } else {
+                // Certificate has expired - safely convert to negative i64
+                let expired_days = (current_secs - expiry_secs) / 86400;
+                -i64::try_from(expired_days).unwrap_or(i64::MAX)
+            };
             log::debug!("Certificate expires in {days_remaining} days");
             if days_remaining < 0 {
                 log::warn!(

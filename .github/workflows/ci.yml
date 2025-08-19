@@ -108,16 +108,17 @@ jobs:
       - name: Install OpenSSL via vcpkg (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          vcpkg install openssl:x64-windows
+          vcpkg install openssl:x64-windows-static-md
           echo "VCPKG_ROOT=${{ steps.runvcpkg.outputs.RUNVCPKG_VCPKG_ROOT_OUT }}" >> $env:GITHUB_ENV
 
       - name: Set OpenSSL environment variables (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           $vcpkg_root = "${{ steps.runvcpkg.outputs.RUNVCPKG_VCPKG_ROOT_OUT }}"
-          echo "OPENSSL_DIR=$vcpkg_root\installed\x64-windows" >> $env:GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=$vcpkg_root\installed\x64-windows\lib" >> $env:GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=$vcpkg_root\installed\x64-windows\include" >> $env:GITHUB_ENV
+          echo "OPENSSL_DIR=$vcpkg_root\installed\x64-windows-static-md" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=$vcpkg_root\installed\x64-windows-static-md\lib" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=$vcpkg_root\installed\x64-windows-static-md\include" >> $env:GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $env:GITHUB_ENV
 
       - name: Set OpenSSL vendored feature (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -127,8 +128,8 @@ jobs:
       - name: Build binary
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            # Windows: Use vcpkg OpenSSL (build.rs will detect automatically)
-            cargo build --release --target ${{ matrix.target }}
+            # Windows: Use static vcpkg OpenSSL to avoid DLL dependencies
+            cargo build --release --target ${{ matrix.target }} --features static-openssl
           else
             # Linux/macOS: Use vendored OpenSSL
             cargo build --release --target ${{ matrix.target }} --features vendored-openssl

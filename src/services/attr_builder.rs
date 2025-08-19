@@ -57,10 +57,10 @@ mod tests {
     use super::*;
     #[test]
     fn delegates_basic() {
-        let svc = AttrBuilderService::new(HashAlgorithm::Sha256);
+        let service = AttrBuilderService::new(HashAlgorithm::Sha256);
         let digest = vec![0x11u8; 32];
         let spc = vec![0x30, 0x00]; // minimal placeholder DER (empty SEQUENCE)
-        let out = svc.build(&digest, &spc, &[], &[]).expect("attr build");
+        let out = service.build(&digest, &spc, &[], &[]).expect("attr build");
         assert!(out.set_der.starts_with(&[0x31]));
         assert!(out.embedding_der.starts_with(&[0xA0]));
         assert!(!out.set_der.is_empty());
