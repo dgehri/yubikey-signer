@@ -34,7 +34,7 @@ Implemented a comprehensive CI/CD pipeline for the YubiKey Signer tool with mult
 
 #### Security Pipeline (`.github/workflows/security.yml`)
 
-- **Daily security audits**: Automated vulnerability scanning with `cargo audit`
+- **Daily security audits**: Automated vulnerability scanning with `cargo deny`
 - **License compliance**: Dependency license checking and reporting
 - **Audit artifacts**: Security scan results archived for review
 
@@ -69,7 +69,7 @@ Implemented a comprehensive CI/CD pipeline for the YubiKey Signer tool with mult
 
 #### Directory Structure
 
-```
+```text
 .github/
 ├── workflows/
 │   ├── ci.yml           # Main CI pipeline
@@ -149,7 +149,7 @@ docs/
 
 - **Code formatting**: `cargo fmt --check`
 - **Linting**: `cargo clippy --all-targets --all-features`
-- **Security**: Daily `cargo audit` scans
+- **Security**: Daily `cargo deny` scans
 - **Build verification**: Cross-platform compilation testing
 - **Documentation**: `cargo doc --no-deps` validation
 

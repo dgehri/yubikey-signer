@@ -2,17 +2,25 @@
 //!
 //! Tests for handling various PE file formats, malformed files, and edge cases
 
-use yubikey_signer::pe::parse_pe;
+use yubikey_signer::domain::pe::parse_pe;
+use yubikey_signer::{
+    services::authenticode::OpenSslAuthenticodeSigner,
+    services::{pe_hasher::PeHasher, spc_builder::SpcBuilderService},
+    HashAlgorithm,
+};
 
 #[test]
 fn test_minimal_pe_file() {
     let pe_data = create_minimal_valid_pe();
-    
+
     let result = parse_pe(&pe_data);
     // May fail due to incomplete implementation, but shouldn't crash
     match result {
         Ok(pe_info) => {
-            println!("Parsed minimal PE: checksum offset {}", pe_info.checksum_offset);
+            println!(
+                "Parsed minimal PE: checksum offset {}",
+                pe_info.checksum_offset
+            );
         }
         Err(e) => {
             println!("Expected failure parsing minimal PE: {e}");
@@ -31,16 +39,19 @@ fn test_corrupted_dos_header() {
         ("Wrong endianness", b"ZM\x00\x90\x00\x03".to_vec()),
         ("Invalid e_lfanew", create_pe_with_invalid_lfanew()),
     ];
-    
+
     for (name, data) in test_cases {
         println!("Testing corrupted DOS header: {name}");
-        
+
         let result = parse_pe(&data);
         assert!(result.is_err(), "Should fail parsing corrupted PE: {name}");
-        
+
         let error_msg = format!("{}", result.unwrap_err());
         assert!(
-            error_msg.contains("DOS") || error_msg.contains("MZ") || error_msg.contains("header") || error_msg.contains("parse"),
+            error_msg.contains("DOS")
+                || error_msg.contains("MZ")
+                || error_msg.contains("header")
+                || error_msg.contains("parse"),
             "Error should mention DOS/MZ header or parsing: {error_msg}"
         );
     }
@@ -54,10 +65,10 @@ fn test_corrupted_pe_header() {
         ("Zero sections", create_pe_with_zero_sections()),
         ("Too many sections", create_pe_with_too_many_sections()),
     ];
-    
+
     for (name, data) in test_cases {
         println!("Testing corrupted PE header: {name}");
-        
+
         let result = parse_pe(&data);
         assert!(result.is_err(), "Should fail parsing corrupted PE: {name}");
     }
@@ -66,15 +77,18 @@ fn test_corrupted_pe_header() {
 #[test]
 fn test_malformed_sections() {
     let test_cases = vec![
-        ("Overlapping sections", create_pe_with_overlapping_sections()),
+        (
+            "Overlapping sections",
+            create_pe_with_overlapping_sections(),
+        ),
         ("Section past EOF", create_pe_with_section_past_eof()),
         ("Zero-size section", create_pe_with_zero_size_section()),
         ("Huge section", create_pe_with_huge_section()),
     ];
-    
+
     for (name, data) in test_cases {
         println!("Testing malformed sections: {name}");
-        
+
         let result = parse_pe(&data);
         // Should handle gracefully
         match result {
@@ -88,7 +102,7 @@ fn test_malformed_sections() {
 fn test_existing_signatures() {
     // Test files that already have signatures
     let pe_with_sig = create_pe_with_existing_signature();
-    
+
     let result = parse_pe(&pe_with_sig);
     match result {
         Ok(pe_info) => {
@@ -110,14 +124,18 @@ fn test_edge_case_file_sizes() {
     let test_cases = vec![
         ("Empty file", vec![]),
         ("1 byte", vec![0x00]),
-        ("63 bytes (DOS header - 1)", vec![0x00; 63]), 
+        ("63 bytes (DOS header - 1)", vec![0x00; 63]),
         ("64 bytes (minimal DOS)", create_minimal_dos_header()),
         ("Very large file simulation", create_large_pe_simulation()),
     ];
-    
+
     for (name, data) in test_cases {
-        println!("Testing file size edge case: {} ({} bytes)", name, data.len());
-        
+        println!(
+            "Testing file size edge case: {} ({} bytes)",
+            name,
+            data.len()
+        );
+
         let result = parse_pe(&data);
         // All should fail gracefully
         assert!(result.is_err(), "Should fail for edge case: {name}");
@@ -128,17 +146,17 @@ fn test_edge_case_file_sizes() {
 fn test_pe_file_modifications() {
     // Test behavior when PE file data changes
     let pe_data = create_minimal_valid_pe();
-    
+
     // Parse first
     let _result1 = parse_pe(&pe_data);
-    
+
     // Modify data
     let mut modified_data = pe_data.clone();
     modified_data.extend_from_slice(b"MODIFIED");
-    
+
     // Parse again - should handle changed file
     let _result2 = parse_pe(&modified_data);
-    
+
     // Both results may be errors, but shouldn't crash
 }
 
@@ -152,17 +170,20 @@ fn test_non_pe_files_with_pe_extensions() {
         ("ELF file", create_fake_elf_file()),
         ("Mach-O file", create_fake_macho_file()),
     ];
-    
+
     for (name, data) in test_cases {
         println!("Testing non-PE file: {name}");
-        
+
         let result = parse_pe(&data);
         assert!(result.is_err(), "Should reject non-PE file: {name}");
-        
+
         let error_msg = format!("{}", result.unwrap_err());
         // Should clearly indicate it's not a valid PE file
         assert!(
-            error_msg.contains("PE") || error_msg.contains("format") || error_msg.contains("invalid") || error_msg.contains("parse"),
+            error_msg.contains("PE")
+                || error_msg.contains("format")
+                || error_msg.contains("invalid")
+                || error_msg.contains("parse"),
             "Error should indicate invalid PE format: {error_msg}"
         );
     }
@@ -172,7 +193,7 @@ fn test_non_pe_files_with_pe_extensions() {
 
 fn create_minimal_valid_pe() -> Vec<u8> {
     let mut pe = Vec::new();
-    
+
     // DOS Header (64 bytes)
     pe.extend_from_slice(b"MZ"); // e_magic
     pe.extend_from_slice(&[0x90, 0x00]); // e_cblp
@@ -188,31 +209,31 @@ fn create_minimal_valid_pe() -> Vec<u8> {
     pe.extend_from_slice(&[0x00, 0x00]); // e_cs
     pe.extend_from_slice(&[0x40, 0x00]); // e_lfarlc
     pe.extend_from_slice(&[0x00, 0x00]); // e_ovno
-    
+
     // Reserved fields
     for _ in 0..4 {
         pe.extend_from_slice(&[0x00, 0x00]);
     }
-    
+
     pe.extend_from_slice(&[0x00, 0x00]); // e_oemid
     pe.extend_from_slice(&[0x00, 0x00]); // e_oeminfo
-    
+
     // More reserved fields
     for _ in 0..10 {
         pe.extend_from_slice(&[0x00, 0x00]);
     }
-    
+
     // e_lfanew - offset to PE header (at 0x100)
     pe.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
-    
+
     // DOS stub (pad to PE header location)
     while pe.len() < 0x100 {
         pe.push(0x00);
     }
-    
+
     // PE Header
     pe.extend_from_slice(b"PE\x00\x00"); // PE signature
-    
+
     // COFF Header
     pe.extend_from_slice(&[0x4c, 0x01]); // Machine (i386)
     pe.extend_from_slice(&[0x01, 0x00]); // NumberOfSections
@@ -221,7 +242,7 @@ fn create_minimal_valid_pe() -> Vec<u8> {
     pe.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // NumberOfSymbols
     pe.extend_from_slice(&[0xE0, 0x00]); // SizeOfOptionalHeader
     pe.extend_from_slice(&[0x02, 0x01]); // Characteristics
-    
+
     // Optional Header (PE32)
     pe.extend_from_slice(&[0x0B, 0x01]); // Magic (PE32)
     pe.extend_from_slice(&[0x0E, 0x00]); // MajorLinkerVersion, MinorLinkerVersion
@@ -249,13 +270,13 @@ fn create_minimal_valid_pe() -> Vec<u8> {
     pe.extend_from_slice(&[0x00, 0x10, 0x00, 0x00]); // SizeOfHeapCommit
     pe.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // LoaderFlags
     pe.extend_from_slice(&[0x10, 0x00, 0x00, 0x00]); // NumberOfRvaAndSizes
-    
+
     // Data directories (16 entries, 8 bytes each)
     for _ in 0..16 {
         pe.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // VirtualAddress
         pe.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // Size
     }
-    
+
     // Section Headers (40 bytes each)
     // .text section
     pe.extend_from_slice(b".text\x00\x00\x00"); // Name
@@ -268,26 +289,24 @@ fn create_minimal_valid_pe() -> Vec<u8> {
     pe.extend_from_slice(&[0x00, 0x00]); // NumberOfRelocations
     pe.extend_from_slice(&[0x00, 0x00]); // NumberOfLinenumbers
     pe.extend_from_slice(&[0x20, 0x00, 0x00, 0x60]); // Characteristics
-    
+
     // Pad to section data
     while pe.len() < 0x400 {
         pe.push(0x00);
     }
-    
+
     // Section data (.text section - 512 bytes)
     for i in 0..512 {
         pe.push((i % 256) as u8);
     }
-    
+
     pe
 }
 
 fn create_minimal_dos_header() -> Vec<u8> {
     let mut dos = Vec::new();
     dos.extend_from_slice(b"MZ");
-    for _ in 2..64 {
-        dos.push(0x00);
-    }
+    dos.extend(std::iter::repeat_n(0x00, 62)); // 64 - 2 = 62
     dos
 }
 
@@ -302,12 +321,12 @@ fn create_pe_with_bad_pe_signature() -> Vec<u8> {
     let mut pe = create_minimal_dos_header();
     // Set e_lfanew to reasonable location
     pe[60..64].copy_from_slice(&[0x80, 0x00, 0x00, 0x00]);
-    
+
     // Pad to PE header location
     while pe.len() < 0x80 {
         pe.push(0x00);
     }
-    
+
     // Bad PE signature
     pe.extend_from_slice(b"NOTPE");
     pe
@@ -316,11 +335,11 @@ fn create_pe_with_bad_pe_signature() -> Vec<u8> {
 fn create_pe_with_invalid_machine() -> Vec<u8> {
     let mut pe = create_minimal_dos_header();
     pe[60..64].copy_from_slice(&[0x80, 0x00, 0x00, 0x00]);
-    
+
     while pe.len() < 0x80 {
         pe.push(0x00);
     }
-    
+
     pe.extend_from_slice(b"PE\x00\x00");
     pe.extend_from_slice(&[0xFF, 0xFF]); // Invalid machine type
     pe
@@ -329,11 +348,11 @@ fn create_pe_with_invalid_machine() -> Vec<u8> {
 fn create_pe_with_zero_sections() -> Vec<u8> {
     let mut pe = create_minimal_dos_header();
     pe[60..64].copy_from_slice(&[0x80, 0x00, 0x00, 0x00]);
-    
+
     while pe.len() < 0x80 {
         pe.push(0x00);
     }
-    
+
     pe.extend_from_slice(b"PE\x00\x00");
     pe.extend_from_slice(&[0x4c, 0x01]); // Machine
     pe.extend_from_slice(&[0x00, 0x00]); // Zero sections
@@ -343,11 +362,11 @@ fn create_pe_with_zero_sections() -> Vec<u8> {
 fn create_pe_with_too_many_sections() -> Vec<u8> {
     let mut pe = create_minimal_dos_header();
     pe[60..64].copy_from_slice(&[0x80, 0x00, 0x00, 0x00]);
-    
+
     while pe.len() < 0x80 {
         pe.push(0x00);
     }
-    
+
     pe.extend_from_slice(b"PE\x00\x00");
     pe.extend_from_slice(&[0x4c, 0x01]); // Machine
     pe.extend_from_slice(&[0xFF, 0xFF]); // Too many sections
@@ -357,6 +376,95 @@ fn create_pe_with_too_many_sections() -> Vec<u8> {
 fn create_pe_with_overlapping_sections() -> Vec<u8> {
     // Create a basic PE but with overlapping section addresses
     create_minimal_valid_pe() // For now, just return valid PE
+}
+
+#[test]
+fn pe_hasher_parity_with_authenticode_signer() {
+    let path = "test-data/test_unsigned.exe";
+    if let Ok(bytes) = std::fs::read(path) {
+        let hasher = PeHasher::new(HashAlgorithm::Sha256);
+        let digest1 = hasher.hash(&bytes).expect("PeHasher should hash");
+        let reference_signer =
+            OpenSslAuthenticodeSigner::new_placeholder_for_hash(HashAlgorithm::Sha256)
+                .expect("test signer");
+        let digest2 = reference_signer
+            .compute_pe_hash(&bytes)
+            .expect("reference hash");
+        assert_eq!(
+            digest1, digest2,
+            "PeHasher digest mismatch with AuthenticodeSigner path"
+        );
+    } else {
+        eprintln!("Skipping parity test; missing test-data/test_unsigned.exe");
+    }
+}
+
+#[test]
+fn spc_builder_parity() {
+    let path = "test-data/test_unsigned.exe";
+    if let Ok(bytes) = std::fs::read(path) {
+        let hasher = PeHasher::new(HashAlgorithm::Sha256);
+        let pe_digest = match hasher.hash(&bytes) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let reference_signer =
+            OpenSslAuthenticodeSigner::new_placeholder_for_hash(HashAlgorithm::Sha256)
+                .expect("test signer");
+        let reference_spc = reference_signer
+            .create_spc_content(&pe_digest)
+            .expect("reference spc");
+        let spc_builder = SpcBuilderService::new(HashAlgorithm::Sha256);
+        let domain_spc = spc_builder
+            .build(&pe_digest, |h| reference_signer.create_spc_content(h))
+            .expect("domain spc");
+        assert_eq!(
+            domain_spc.as_der(),
+            &reference_spc,
+            "SPC DER mismatch between service and AuthenticodeSigner"
+        );
+    } else {
+        eprintln!("Skipping SPC parity test; missing test-data/test_unsigned.exe");
+    }
+}
+
+#[test]
+fn signed_attributes_builder_parity() {
+    let path = "test-data/test_unsigned.exe";
+    if let Ok(bytes) = std::fs::read(path) {
+        let signer = OpenSslAuthenticodeSigner::new_placeholder_for_hash(HashAlgorithm::Sha256)
+            .expect("test signer");
+        let pe_digest = signer.compute_pe_hash(&bytes).expect("hash");
+        let spc = signer.create_spc_content(&pe_digest).expect("spc");
+        // Reference authenticated attributes (already sorted & with complete DER sequences stored in value position)
+        let reference_attrs = signer
+            .create_authenticated_attributes(&pe_digest, &spc, None, &bytes)
+            .expect("reference attrs");
+        let mut reference_concat = Vec::new();
+        for (_, der) in &reference_attrs {
+            reference_concat.extend_from_slice(der);
+        }
+        // Rebuild logical list for SignedAttributesBuilder parity (each der already complete Attribute sequence)
+        let logical: Vec<yubikey_signer::domain::pkcs7::SignedAttributeLogical> = reference_attrs
+            .iter()
+            .map(
+                |(name, der)| yubikey_signer::domain::pkcs7::SignedAttributeLogical {
+                    oid: name.clone(),
+                    der: der.clone(),
+                },
+            )
+            .collect();
+        let builder =
+            yubikey_signer::services::signed_attributes_builder::SignedAttributesBuilder::new();
+        let canonical = builder.canonicalize(logical);
+        assert_eq!(
+            canonical.concatenated_der(),
+            &reference_concat[..],
+            "SignedAttributesBuilder canonical DER mismatch with AuthenticodeSigner ordering"
+        );
+    } else {
+        eprintln!("Skipping SignedAttributesBuilder parity test; missing temp/test_unsigned.exe");
+    }
 }
 
 fn create_pe_with_section_past_eof() -> Vec<u8> {
@@ -385,7 +493,9 @@ fn create_large_pe_simulation() -> Vec<u8> {
 
 fn create_fake_dos_executable() -> Vec<u8> {
     // Old DOS .COM file format
-    vec![0xB4, 0x09, 0xBA, 0x10, 0x01, 0xCD, 0x21, 0xCD, 0x20, b'H', b'e', b'l', b'l', b'o', b'$']
+    vec![
+        0xB4, 0x09, 0xBA, 0x10, 0x01, 0xCD, 0x21, 0xCD, 0x20, b'H', b'e', b'l', b'l', b'o', b'$',
+    ]
 }
 
 fn create_fake_elf_file() -> Vec<u8> {

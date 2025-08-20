@@ -5,7 +5,9 @@
 use std::env;
 use std::io::Write;
 use tempfile::TempDir;
-use yubikey_signer::types::{PivPin, PivSlot, TimestampUrl};
+use yubikey_signer::PivPin;
+use yubikey_signer::PivSlot;
+use yubikey_signer::TimestampUrl;
 use yubikey_signer::{HashAlgorithm, SigningConfig};
 
 /// Test suite for CLI argument validation
@@ -365,7 +367,7 @@ mod file_handling_tests {
         let long_file = temp_dir.path().join(&long_name);
         let long_result = std::fs::write(&long_file, b"Long filename content");
         match long_result {
-            Ok(_) => println!("Long filename worked: {} chars", long_name.len()),
+            Ok(()) => println!("Long filename worked: {} chars", long_name.len()),
             Err(e) => println!("Long filename failed (expected): {e}"),
         }
 
@@ -375,7 +377,7 @@ mod file_handling_tests {
             let special_file = temp_dir.path().join(special_name);
             let special_result = std::fs::write(&special_file, b"Special char content");
             match special_result {
-                Ok(_) => println!("Special char filename '{special_name}' worked"),
+                Ok(()) => println!("Special char filename '{special_name}' worked"),
                 Err(e) => println!("Special char filename '{special_name}' failed: {e}"),
             }
         }
@@ -600,16 +602,16 @@ mod unix_specific_tests {
         ];
 
         for path in unix_paths {
-            println!("Testing Unix path: {}", path);
+            println!("Testing Unix path: {path}");
 
             let path_obj = std::path::Path::new(path);
 
             if let Some(parent) = path_obj.parent() {
-                println!("  Parent: {:?}", parent);
+                println!("  Parent: {parent:?}");
             }
 
             if let Some(filename) = path_obj.file_name() {
-                println!("  Filename: {:?}", filename);
+                println!("  Filename: {filename:?}");
             }
         }
     }
@@ -628,7 +630,7 @@ mod unix_specific_tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = metadata.permissions().mode();
-            println!("Unix file mode: 0{:o}", mode);
+            println!("Unix file mode: 0{mode:o}");
         }
     }
 }

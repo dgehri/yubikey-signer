@@ -36,8 +36,9 @@ The project uses GitHub Actions for CI/CD with three main workflows:
 
 3. **Security Audit**
    - Daily dependency vulnerability scanning
-   - Uses `cargo audit` for security analysis
+   - Uses `cargo deny` for security analysis
    - Results uploaded as artifacts
+   - Security checks now integrated into CI and release workflows
 
 **Caching:**
 

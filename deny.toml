@@ -1,0 +1,83 @@
+############################################################
+# Cargo Deny Configuration
+# Purpose: Enforce allowed license set and flag insecure deps.
+# Scope: Minimal allowlist suitable for typical Rust ecosystem
+# while remaining permissive for widely-used crates.
+#
+# Run locally:
+#   cargo install cargo-deny
+#   cargo deny check licenses
+#   cargo deny check advisories
+#   cargo deny check bans
+#   cargo deny check sources
+############################################################
+
+[graph]
+# Speed up by pruning dev dependencies in license/advisory checks
+all-features = false
+no-default-features = false
+features = []
+
+[output]
+# Control feature graph depth for cleaner output
+feature-depth = 1
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Justification: RSA operations are performed on hardware (YubiKey PIV) via the
+    # `yubikey` crate; we don't use software RSA decryption that would be affected
+    # by the Marvin timing side-channel. We monitor upstream for a fixed release.
+    "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2021-0145, RUSTSEC-2024-0375: atty is unmaintained but widely used in ecosystem.
+    # Replacement (std::io::IsTerminal) requires Rust 1.70+. Risk is minimal in practice.
+    "RUSTSEC-2021-0145",
+    "RUSTSEC-2024-0375",
+]
+
+[licenses]
+# Confidence threshold for license detection (0.0-1.0)
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    # Unicode Consortium licenses for international text processing
+    "Unicode-3.0",
+    # Community Data License for certificate data
+    "CDLA-Permissive-2.0",
+]
+
+[[licenses.clarify]]
+name = "ring"
+# ring includes code with multiple licenses; treat overall as permissive.
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
+[licenses.private]
+# Don't check licenses for unpublished workspace crates
+ignore = false
+
+[bans]
+# Warn about multiple versions (common in Rust ecosystem)
+multiple-versions = "warn"
+# Allow wildcard version specifications
+wildcards = "allow"
+# Graph highlighting for duplicate detection
+highlight = "all"
+# Default features policy for workspace and external crates
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# Sources configuration
+[sources]
+# Lint level for unknown registries and git repos
+unknown-registry = "warn"
+unknown-git = "warn"
+# Allow only crates.io registry
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
