@@ -51,6 +51,12 @@ jobs:
       - name: Check documentation
         run: cargo doc --no-deps --all-features
 
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run security checks
+        run: cargo deny check
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -9,10 +9,7 @@
 #   cargo deny check licenses
 #   cargo deny check advisories
 #   cargo deny check bans
-#
-# Note: Primary security scanning remains via cargo-audit using
-# audit.toml. We mirror the advisory ignore here to keep outputs
-# consistent if advisories check is run.
+#   cargo deny check sources
 ############################################################
 
 [graph]
@@ -20,6 +17,10 @@
 all-features = false
 no-default-features = false
 features = []
+
+[output]
+# Control feature graph depth for cleaner output
+feature-depth = 1
 
 [advisories]
 ignore = [
@@ -35,6 +36,8 @@ ignore = [
 ]
 
 [licenses]
+# Confidence threshold for license detection (0.0-1.0)
+confidence-threshold = 0.8
 allow = [
     "MIT",
     "Apache-2.0",
@@ -55,5 +58,26 @@ name = "ring"
 expression = "MIT AND ISC AND OpenSSL"
 license-files = [{ path = "LICENSE", hash = 0 }]
 
+[licenses.private]
+# Don't check licenses for unpublished workspace crates
+ignore = false
+
 [bans]
-multiple-versions = "allow"
+# Warn about multiple versions (common in Rust ecosystem)
+multiple-versions = "warn"
+# Allow wildcard version specifications
+wildcards = "allow"
+# Graph highlighting for duplicate detection
+highlight = "all"
+# Default features policy for workspace and external crates
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# Sources configuration
+[sources]
+# Lint level for unknown registries and git repos
+unknown-registry = "warn"
+unknown-git = "warn"
+# Allow only crates.io registry
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

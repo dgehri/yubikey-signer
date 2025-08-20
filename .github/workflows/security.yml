@@ -1,0 +1,56 @@
+name: Security Audit
+
+on:
+  schedule:
+    # Run daily at 09:18 UTC (matches the time from error log)
+    - cron: '18 9 * * *'
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual triggering
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: security-audit
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run security audit
+        run: cargo deny check advisories
+
+      - name: Run license check
+        run: cargo deny check licenses
+
+      - name: Run dependency bans check
+        run: cargo deny check bans
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-results
+          path: |
+            deny.toml
+          retention-days: 30

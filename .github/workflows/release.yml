@@ -91,6 +91,12 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run security checks
+        run: cargo deny check
+
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |

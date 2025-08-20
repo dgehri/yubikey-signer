@@ -86,7 +86,7 @@ impl From<std::io::Error> for SigningError {
 }
 
 // Note: We intentionally avoid depending on the `rsa` crate directly to
-// mitigate audit warnings (RUSTSEC-2023-0071). RSA operations are delegated
+// mitigate security warnings (RUSTSEC-2023-0071). RSA operations are delegated
 // to the YubiKey hardware via the `yubikey` crate; any crypto errors are
 // reported through higher-level error variants.
 
