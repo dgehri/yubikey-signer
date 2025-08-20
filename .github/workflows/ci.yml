@@ -52,7 +52,9 @@ jobs:
         run: cargo doc --no-deps --all-features
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.18.4
 
       - name: Run security checks
         run: cargo deny check

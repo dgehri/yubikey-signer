@@ -2,7 +2,8 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*.*.*'
 
 permissions:
   contents: write
@@ -13,49 +14,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  prepare-release:
-    name: Prepare Release Metadata
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
-      should_release: ${{ steps.evaluate.outputs.should_release }}
-    steps:
-      - uses: actions/checkout@v5
-      - id: meta
-        name: Read version from Cargo.toml
-        run: |
-          VERSION=$(grep '^version = ' Cargo.toml | head -n1 | cut -d '"' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      - id: evaluate
-        name: Decide if new tag needed
-        run: |
-          if git rev-parse -q --verify "refs/tags/v${{ steps.meta.outputs.version }}"; then
-            echo "should_release=false" >> $GITHUB_OUTPUT
-          else
-            echo "should_release=true" >> $GITHUB_OUTPUT
-          fi
-
-  create-tag:
-    name: Create Tag
-    runs-on: ubuntu-latest
-    needs: prepare-release
-    if: needs.prepare-release.outputs.should_release == 'true'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Create & push tag
-        run: |
-          git tag v${{ needs.prepare-release.outputs.version }}
-          git push origin v${{ needs.prepare-release.outputs.version }}
-
   build-release:
     name: Build Release Artifacts
     runs-on: ${{ matrix.os }}
-    needs: [prepare-release, create-tag]
-    if: needs.prepare-release.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +53,9 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.18.4
 
       - name: Run security checks
         run: cargo deny check
@@ -166,8 +129,7 @@ jobs:
   create-release:
     name: Create GitHub Release & Publish
     runs-on: ubuntu-latest
-    needs: [prepare-release, build-release]
-    if: needs.prepare-release.outputs.should_release == 'true'
+    needs: [build-release]
     permissions:
       contents: write
       discussions: write
@@ -180,11 +142,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare-release.outputs.version }}
-          name: Release v${{ needs.prepare-release.outputs.version }}
           files: dist/**/yubikey-signer*
           body: |
-            ## Release v${{ needs.prepare-release.outputs.version }}
+            ## Release ${{ github.ref_name }}
             Binaries for Windows, Linux, and macOS (Intel & Apple Silicon).
             See README for usage instructions.
       - name: Publish to crates.io
