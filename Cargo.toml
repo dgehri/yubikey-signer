@@ -7,6 +7,9 @@ authors = ["Daniel Gehriger <gehriger@linkcad.com>"]
 license = "Apache-2.0"
 default-run = "yubikey-signer"
 readme = "README.md"
+repository = "https://github.com/dgehri/yubikey-signer"
+homepage = "https://github.com/dgehri/yubikey-signer"
+documentation = "https://github.com/dgehri/yubikey-signer#readme"
 
 [lib]
 name = "yubikey_signer"
