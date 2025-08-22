@@ -135,11 +135,27 @@ jobs:
       discussions: write
     steps:
       - uses: actions/checkout@v5
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libpcsclite-dev
+          # Note: Not installing libssl-dev - we use vendored OpenSSL
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: publish
+
       # Publish to crates.io before downloading artifacts so the working tree stays clean.
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --token $CARGO_REGISTRY_TOKEN
+          OPENSSL_STATIC: 1
+        run: cargo publish --token $CARGO_REGISTRY_TOKEN --features vendored-openssl
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
