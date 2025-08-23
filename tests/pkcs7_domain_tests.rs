@@ -46,8 +46,8 @@ fn pkcs7_service_matches_authenticode_builder_no_timestamp() {
 
 #[test]
 fn pkcs7_service_parity_real_cert_dummy_signature() {
-    // Load real test certificate (PEM) from reference path
-    let pem_path = Path::new("reference").join("cert.pem");
+    // Load real test certificate (PEM) from test-data path
+    let pem_path = Path::new("test-data").join("cert.pem");
     let pem = fs::read(&pem_path).expect("read cert.pem");
     let cert = X509::from_pem(&pem).expect("parse pem");
     let cert_der = cert.to_der().expect("der");
