@@ -1,0 +1,81 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Test artifacts
+*.exe
+*.dll
+*.pem
+*.p12
+*.pfx
+test_*.exe
+signed_*.exe
+temp_*.exe
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Windows
+*.lnk
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# YubiKey test certificates (don't commit real certs)
+test_certs/
+*.crt
+*.key
+
+# Copilot configs
+.github/instructions
+
+# Old directory (already committed, but ignore future additions)
+old/new_*
+old/temp_*
+old/test_*
+
+# Exclude binaries from old directory
+old/*/bin/*.exe
+old/*/bin/*.dll
+old/cert.pem
+old/stunnel/config/ca-certs.pem
+old/stunnel/config/stunnel.pem
+# reference
+temp/
+# But include test files needed for build
+!temp/test_unsigned.exe
+!temp/cert.pem
+TODO.md
+*.p7s
+reference
+dist/

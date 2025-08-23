@@ -1,0 +1,102 @@
+name: Auto Tag on Version Bump
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag-on-version-bump:
+    name: Create tag if Cargo.toml version changed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect version bump and create tag
+        id: autotag
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # If 'before' SHA is all zeros (e.g., initial push), use the previous commit
+          if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            BEFORE_SHA=$(git rev-parse HEAD^ || echo "")
+          fi
+
+          echo "Before: $BEFORE_SHA"
+          echo "Current: $CURRENT_SHA"
+
+          # If Cargo.toml didn't change in this push, exit early
+          if ! git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" | grep -qx "Cargo.toml"; then
+            echo "Cargo.toml not changed, skipping tag creation."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract version from the [package] section only
+          get_version_from_file() {
+            sed -nE '/^\[package\]/,/^\[/{ s/^\s*version\s*=\s*"([^"]+)".*/\1/p }' "$1" | head -n1
+          }
+
+          # Previous version from previous commit's Cargo.toml
+          if [[ -n "$BEFORE_SHA" ]]; then
+            git show "$BEFORE_SHA:Cargo.toml" > /tmp/Cargo.before.toml || true
+          fi
+          PREV_VERSION=""
+          if [[ -f /tmp/Cargo.before.toml ]]; then
+            PREV_VERSION=$(get_version_from_file /tmp/Cargo.before.toml || true)
+          fi
+
+          # Current version from working tree
+          CURR_VERSION=$(get_version_from_file Cargo.toml)
+
+          echo "Previous version: ${PREV_VERSION:-<none>}"
+          echo "Current version: $CURR_VERSION"
+
+          if [[ -z "$CURR_VERSION" ]]; then
+            echo "Could not determine current version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ "$CURR_VERSION" == "$PREV_VERSION" || -z "$PREV_VERSION" ]]; then
+            # If prev version is empty (e.g., file newly added), or versions equal, don't tag
+            if [[ "$CURR_VERSION" == "$PREV_VERSION" ]]; then
+              echo "No version bump detected; skipping."
+            else
+              echo "Previous version not detected (new file or history issue); skipping for safety."
+            fi
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TAG="v$CURR_VERSION"
+
+          # Check if tag already exists remotely
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin; skipping."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Configure git identity and create tag
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+          echo "Created and pushed tag $TAG"
+          echo "should_tag=true" >> "$GITHUB_OUTPUT"
+
+      - name: Note
+        if: steps.autotag.outputs.should_tag == 'true'
+        run: |
+          echo "Tag created. The Release workflow (on tags v*.*.*) will run automatically."
