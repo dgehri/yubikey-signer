@@ -257,7 +257,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     // Determine output path - default to in-place
     let output_path = args.output.unwrap_or_else(|| args.input_file.clone());
 
-    // Build simple signing configuration
+    // Signing configuration
     let signing_config = SigningConfig {
         pin: PivPin::new(pin).into_diagnostic()?,
         piv_slot,
@@ -294,7 +294,6 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
 
     let start_time = std::time::Instant::now();
 
-    // Use high-level Signer pipeline (handles signature-bytes timestamp correctly)
     let workflow = SignWorkflow::new(signing_config.hash_algorithm);
     let config_clone = signing_config.clone();
     match workflow
