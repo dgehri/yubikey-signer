@@ -52,7 +52,7 @@ tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Command line interface
-clap = { version = "4.5.45", features = ["derive"] }
+clap = { version = "4.5.49", features = ["derive"] }
 rpassword = "7.0"
 
 # Error handling
