@@ -121,7 +121,7 @@ jobs:
           fi
 
       - name: Upload Release Asset (deferred)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: artifact-${{ matrix.target }}
           path: ${{ matrix.asset-name }}
