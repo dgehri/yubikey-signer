@@ -54,7 +54,7 @@ jobs:
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.18.4
+          tool: cargo-deny@0.18.5
 
       - name: Run security checks
         run: cargo deny check

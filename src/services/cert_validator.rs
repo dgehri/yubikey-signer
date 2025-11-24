@@ -358,7 +358,7 @@ impl CertificateValidator {
         let days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
         let mut days = 0u64;
         for y in 1970..year {
-            days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+            days += if (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400) {
                 366
             } else {
                 365
@@ -366,7 +366,10 @@ impl CertificateValidator {
         }
         for m in 1..month {
             days += days_in_month[(m - 1) as usize] as u64;
-            if m == 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) {
+            if m == 2
+                && ((year.is_multiple_of(4) && !year.is_multiple_of(100))
+                    || year.is_multiple_of(400))
+            {
                 days += 1;
             }
         }
