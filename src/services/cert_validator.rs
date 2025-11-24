@@ -366,7 +366,10 @@ impl CertificateValidator {
         }
         for m in 1..month {
             days += days_in_month[(m - 1) as usize] as u64;
-            if m == 2 && ((year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)) {
+            if m == 2
+                && ((year.is_multiple_of(4) && !year.is_multiple_of(100))
+                    || year.is_multiple_of(400))
+            {
                 days += 1;
             }
         }
