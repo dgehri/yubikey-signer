@@ -132,21 +132,17 @@ impl FromStr for HashAlgorithm {
     }
 }
 
-/// Main signing function - signs a PE file using `YubiKey`
-pub async fn sign_pe_file<P: AsRef<Path>>(
-    input_path: P,
-    output_path: P,
+/// `Data` signing function - signs PE data (file) using `YubiKey`
+pub async fn sign_pe_data<I: AsRef<[u8]>>(
+    input: I,
     config: SigningConfig,
-) -> SigningResult<()> {
-    log::info!("Starting PE file signing process");
-
-    // Read input file
-    let file_data = std::fs::read(&input_path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+) -> SigningResult<Vec<u8>> {
+    // Get input file data as byte slice
+    let file_data = input.as_ref();
 
     // Validate it's a PE file before accessing hardware, so we fail fast
     // with a clear PE parsing error on invalid inputs.
-    let _ = crate::domain::pe::layout::parse_pe(&file_data)?;
+    let _ = crate::domain::pe::layout::parse_pe(file_data)?;
 
     // Connect to YubiKey and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect()?;
@@ -160,7 +156,7 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
     let signer = OpenSslAuthenticodeSigner::new(&certificate_der, config.hash_algorithm)?;
 
     // Compute PE hash for signing
-    let pe_hash = signer.compute_pe_hash(&file_data)?;
+    let pe_hash = signer.compute_pe_hash(file_data)?;
     log::debug!("Computed PE hash: {} bytes", pe_hash.len());
 
     // Don't sign the hash directly - remove this line since bridge will handle it
@@ -183,15 +179,32 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
         config.hash_algorithm,
     )?;
 
-    let signed_data = bridge.sign_pe_file(
-        &file_data,
+    bridge.sign_pe_file(
+        file_data,
         config.piv_slot,
         timestamp_token.as_deref(),
         config.embed_certificate,
-    )?;
+    )
+}
+
+/// File signing function - signs a PE file using `YubiKey`
+pub async fn sign_pe_file<P: AsRef<Path>>(
+    input_path: P,
+    output_path: P,
+    config: SigningConfig,
+) -> SigningResult<()> {
+    log::info!("Starting PE file signing process");
+
+    // Read input file
+    let file_data = tokio::fs::read(&input_path)
+        .await
+        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+
+    let signed_data = sign_pe_data(&file_data, config).await?;
 
     // Write signed file
-    std::fs::write(&output_path, signed_data)
+    tokio::fs::write(&output_path, signed_data)
+        .await
         .map_err(|e| SigningError::IoError(format!("Failed to write output file: {e}")))?;
 
     log::info!("Successfully signed PE file: {:?}", output_path.as_ref());
