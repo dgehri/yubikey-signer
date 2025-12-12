@@ -67,9 +67,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build x86_64-musl Docker image
         run: |
           docker build -t yubikey-x86_64-musl-builder \
@@ -207,9 +204,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Build aarch64-direct-usb Docker image
         run: |
