@@ -3,12 +3,19 @@
 //! Provides an HTTPS server that exposes `YubiKey` signing operations
 //! via a REST API. This server runs on the machine with the physical
 //! `YubiKey` attached and allows remote clients to request signatures.
+//!
+//! # Backend Selection
+//!
+//! The server supports multiple backends:
+//! - **Direct USB** (default when available): No pcscd required, ideal for
+//!   embedded systems and routers
+//! - **PC/SC**: Traditional smart card interface, requires pcscd on Linux
 
 use super::protocol::{
     error_codes, ErrorResponse, GetCertificateRequest, GetCertificateResponse, SignRequest,
     SignResponse, StatusResponse, PROTOCOL_VERSION,
 };
-use crate::adapters::yubikey::ops::YubiKeyOperations;
+use crate::adapters::backend::{connect_best_backend, BackendType, YubiKeyBackend};
 use crate::domain::types::{PivPin, PivSlot};
 use crate::infra::error::{SigningError, SigningResult};
 use std::sync::{Arc, Mutex};
@@ -72,8 +79,10 @@ impl ProxyServerConfig {
 
 /// Shared state for the proxy server handlers.
 pub struct ProxyState {
-    /// `YubiKey` operations instance (locked for thread safety).
-    yubikey: Mutex<YubiKeyOperations>,
+    /// `YubiKey` backend instance (locked for thread safety).
+    backend: Mutex<Box<dyn YubiKeyBackend>>,
+    /// Backend type in use.
+    backend_type: BackendType,
     /// Expected authentication token.
     auth_token: String,
     /// Server start time for uptime reporting.
@@ -83,20 +92,22 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
-    /// Create new proxy state with an authenticated `YubiKey`.
+    /// Create new proxy state with an authenticated `YubiKey` backend.
     ///
     /// # Arguments
-    /// * `yubikey` - Authenticated `YubiKey` operations
+    /// * `backend` - Authenticated `YubiKey` backend
     /// * `auth_token` - Expected bearer token
     /// * `available_slots` - Slots with certificates
     #[must_use]
     pub fn new(
-        yubikey: YubiKeyOperations,
+        backend: Box<dyn YubiKeyBackend>,
         auth_token: String,
         available_slots: Vec<PivSlot>,
     ) -> Self {
+        let backend_type = backend.backend_type();
         Self {
-            yubikey: Mutex::new(yubikey),
+            backend: Mutex::new(backend),
+            backend_type,
             auth_token,
             start_time: Instant::now(),
             available_slots,
@@ -120,6 +131,12 @@ impl ProxyState {
         }
         result == 0
     }
+
+    /// Get the backend type in use.
+    #[must_use]
+    pub fn backend_type(&self) -> BackendType {
+        self.backend_type
+    }
 }
 
 /// Handle the status endpoint.
@@ -130,10 +147,10 @@ impl ProxyState {
 /// # Returns
 /// Status response with `YubiKey` and server information.
 pub fn handle_status(state: &Arc<ProxyState>) -> StatusResponse {
-    let mut yubikey = state.yubikey.lock().unwrap();
+    let mut backend = state.backend.lock().unwrap();
 
-    let serial = yubikey.get_serial().ok();
-    let firmware_version = yubikey.get_version().ok();
+    let serial = backend.get_serial().ok();
+    let firmware_version = backend.get_version().ok();
 
     StatusResponse {
         version: PROTOCOL_VERSION.to_string(),
@@ -176,8 +193,8 @@ pub fn handle_get_certificate(
     let slot = parse_slot(&request.slot)?;
 
     // Get certificate
-    let mut yubikey = state.yubikey.lock().unwrap();
-    let cert_der = yubikey.get_certificate_der(slot).map_err(|e| {
+    let mut backend = state.backend.lock().unwrap();
+    let cert_der = backend.get_certificate_der(slot).map_err(|e| {
         ErrorResponse::new(
             error_codes::CERT_NOT_FOUND,
             format!("Failed to get certificate: {e}"),
@@ -233,10 +250,16 @@ pub fn handle_sign(
     }
 
     // Perform signing
-    let mut yubikey = state.yubikey.lock().unwrap();
-    let signature = yubikey.sign_hash(&digest, slot).map_err(|e| {
+    let mut backend = state.backend.lock().unwrap();
+    let signature = backend.sign_hash(&digest, slot).map_err(|e| {
         ErrorResponse::new(error_codes::SIGNING_FAILED, format!("Signing failed: {e}"))
     })?;
+
+    log::info!(
+        "Signature produced: {} bytes, first 4 bytes: {:02X?}",
+        signature.len(),
+        &signature[..4.min(signature.len())]
+    );
 
     Ok(SignResponse::new(&signature, request.nonce.clone()))
 }
@@ -256,8 +279,11 @@ fn parse_slot(slot_str: &str) -> Result<PivSlot, ErrorResponse> {
 
 /// Initialize the proxy server.
 ///
-/// This function connects to the `YubiKey`, authenticates with the PIN,
-/// and discovers available certificates.
+/// This function connects to the `YubiKey` using the best available backend,
+/// authenticates with the PIN, and discovers available certificates.
+///
+/// On systems without pcscd, the direct USB backend will be used automatically
+/// if the `direct-usb` feature is enabled.
 ///
 /// # Arguments
 /// * `config` - Proxy server configuration
@@ -268,17 +294,19 @@ fn parse_slot(slot_str: &str) -> Result<PivSlot, ErrorResponse> {
 /// # Errors
 /// Returns error if `YubiKey` connection or authentication fails.
 pub fn initialize_proxy(config: &ProxyServerConfig) -> SigningResult<Arc<ProxyState>> {
-    log::info!("Connecting to YubiKey...");
-    let mut yubikey = YubiKeyOperations::connect()?;
+    log::info!("Connecting to YubiKey (auto-selecting backend)...");
+    let mut backend = connect_best_backend()?;
+
+    log::info!("Using {} backend", backend.backend_type());
 
     log::info!("Authenticating with PIN...");
-    yubikey.authenticate(&config.pin)?;
+    backend.authenticate(&config.pin)?;
 
     // Discover available slots
     let mut available_slots = Vec::new();
     for slot_id in [0x9a, 0x9c, 0x9d, 0x9e] {
         if let Ok(slot) = PivSlot::new(slot_id) {
-            if yubikey.get_certificate_der(slot).is_ok() {
+            if backend.get_certificate_der(slot).is_ok() {
                 available_slots.push(slot);
                 log::info!("Found certificate in slot {slot}");
             }
@@ -291,12 +319,12 @@ pub fn initialize_proxy(config: &ProxyServerConfig) -> SigningResult<Arc<ProxySt
         ));
     }
 
-    let serial = yubikey.get_serial().unwrap_or(0);
-    let version = yubikey.get_version().unwrap_or_default();
+    let serial = backend.get_serial().unwrap_or(0);
+    let version = backend.get_version().unwrap_or_default();
     log::info!("YubiKey ready: serial={serial}, firmware={version}");
 
     Ok(Arc::new(ProxyState::new(
-        yubikey,
+        backend,
         config.auth_token.clone(),
         available_slots,
     )))

@@ -55,6 +55,7 @@ pub enum SigningError {
     ConfigurationError(String),
 }
 
+#[cfg(feature = "pcsc-backend")]
 impl From<yubikey::Error> for SigningError {
     fn from(error: yubikey::Error) -> Self {
         SigningError::YubiKeyError(error.to_string())

@@ -605,14 +605,14 @@ async fn handle_remote_sign(
         .into_diagnostic()
         .context("Failed to create signer with remote certificate")?;
 
-    // Compute TBS (to-be-signed) hash locally
-    // This is the hash of the authenticated attributes SET, NOT the PE hash!
-    // Authenticode signs the authenticated attributes, which contain the PE hash.
+    // Compute TBS (to-be-signed) hash locally with context
+    // This computes the authenticated attributes and preserves them for later embedding.
+    // Using context ensures the signingTime is identical in hash computation and final PKCS7.
     if args.verbose {
         println!("🔢 Computing TBS hash (authenticated attributes)...");
     }
-    let tbs_hash = openssl_signer
-        .compute_tbs_hash(&pe_data)
+    let tbs_context = openssl_signer
+        .compute_tbs_hash_with_context(&pe_data)
         .into_diagnostic()?;
 
     // Sign TBS hash remotely
@@ -620,7 +620,7 @@ async fn handle_remote_sign(
         println!("✍️  Signing TBS hash remotely...");
     }
     let signature = client
-        .sign_hash(&tbs_hash, piv_slot)
+        .sign_hash(&tbs_context.tbs_hash, piv_slot)
         .await
         .into_diagnostic()?;
 
@@ -646,9 +646,14 @@ async fn handle_remote_sign(
         None
     };
 
-    // Create signed PE with remote signature
+    // Create signed PE using preserved context (ensures signingTime matches)
     let signed_pe = openssl_signer
-        .create_signed_pe_with_raw_signature(&pe_data, &signature, timestamp_token.as_deref())
+        .create_signed_pe_with_context(
+            &pe_data,
+            &tbs_context,
+            &signature,
+            timestamp_token.as_deref(),
+        )
         .into_diagnostic()
         .context("Failed to create signed PE")?;
 

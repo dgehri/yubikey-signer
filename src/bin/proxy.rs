@@ -45,7 +45,7 @@ struct Cli {
     #[arg(short, long, default_value = "127.0.0.1:8443")]
     bind: String,
 
-    /// Authentication token for clients (or set YUBIKEY_PROXY_TOKEN env var)
+    /// Authentication token for clients (or set `YUBIKEY_PROXY_TOKEN` env var)
     #[arg(short, long, env = "YUBIKEY_PROXY_TOKEN")]
     token: String,
 
@@ -75,18 +75,17 @@ async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     // Get PIN from environment
-    let pin = match std::env::var("YUBICO_PIN") {
-        Ok(p) => match PivPin::new(&p) {
+    let pin = if let Ok(p) = std::env::var("YUBICO_PIN") {
+        match PivPin::new(&p) {
             Ok(pin) => pin,
             Err(e) => {
                 eprintln!("❌ Invalid PIN: {e}");
                 std::process::exit(1);
             }
-        },
-        Err(_) => {
-            eprintln!("❌ YUBICO_PIN environment variable not set");
-            std::process::exit(1);
         }
+    } else {
+        eprintln!("❌ YUBICO_PIN environment variable not set");
+        std::process::exit(1);
     };
 
     // Build configuration

@@ -19,6 +19,17 @@ This document describes how to sign code using a YubiKey connected to a remote d
 └────────────────────────────┘                    └──────────────────────────────┘
 ```
 
+## Backend Options
+
+The proxy server supports two communication backends for talking to the YubiKey:
+
+| Backend        | Feature Flag   | pcscd Required | Best For                      |
+| -------------- | -------------- | -------------- | ----------------------------- |
+| **Direct USB** | `direct-usb`   | ❌ No          | Embedded systems, routers     |
+| **PC/SC**      | `pcsc-backend` | ✅ Yes         | Desktop systems, full setups  |
+
+The **Direct USB backend** communicates with the YubiKey via raw USB CCID protocol, eliminating the need for pcscd or any smart card middleware. This is the recommended choice for embedded deployments.
+
 ## Security Model
 
 ### Authentication
@@ -173,9 +184,65 @@ $env:YUBIKEY_PROXY_TOKEN = "your-token"
 yubikey-signer sign input.exe --output signed.exe --remote "http://192.168.1.100:8443"
 ```
 
-## Router Deployment (ASUS RT-AX88U)
+## Router Deployment (Direct USB — Recommended)
 
-This section documents deploying to an ASUS router running ASUSWRT-Merlin with Entware.
+This section documents the **recommended** deployment using direct USB/CCID, which requires no pcscd daemon or smart card middleware.
+
+### Prerequisites
+
+- Router or embedded device with USB port
+- SSH access to the device
+- YubiKey 5 series or newer
+
+### Build the Binary
+
+Build for `aarch64-unknown-linux-musl` with the `direct-usb` feature:
+
+```powershell
+# Build using Docker (creates fully static binary)
+docker compose -f docker/docker-compose.yml run --rm build-aarch64-direct-usb
+
+# Copy to router
+scp target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy dgehriger@192.168.42.1:/jffs/
+```
+
+### Deployment
+
+Only a single binary is required:
+
+```text
+/jffs/
+└── yubikey-proxy   # Self-contained, no dependencies
+```
+
+### Startup Script
+
+Create `/jffs/scripts/start-yubikey-proxy.sh`:
+
+```bash
+#!/bin/sh
+export YUBICO_PIN="your-pin"
+export YUBIKEY_PROXY_TOKEN="your-token"
+
+# Start proxy (direct USB, no pcscd needed)
+exec /jffs/yubikey-proxy --bind 0.0.0.0:18443
+```
+
+### Why Direct USB?
+
+| Benefit                  | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| **No pcscd required**    | Binary talks directly to YubiKey via USB CCID    |
+| **Single binary**        | No library files, no runtime linker, no services |
+| **Fully static**         | Works on any Linux ARM64 regardless of libc      |
+| **Simpler deployment**   | Just copy the binary and run                     |
+| **Lower resource usage** | No daemon overhead                               |
+
+---
+
+## Router Deployment (PC/SC — Legacy)
+
+This section documents the **legacy** deployment using pcscd. Use this only if direct USB doesn't work for your hardware.
 
 ### Prerequisites
 
@@ -215,7 +282,7 @@ Because the router uses glibc but our binary uses musl, we need:
 └── libgcc_s.so.1                  # GCC runtime
 ```
 
-### Startup Script
+### Startup Script (Legacy)
 
 Create `/jffs/scripts/start-yubikey-proxy.sh`:
 
@@ -248,28 +315,77 @@ exec /jffs/ld-musl-aarch64.so.1.alpine /jffs/yubikey-proxy --bind 0.0.0.0:18443
 
 ## Troubleshooting
 
-### "The Smart card resource manager has shut down"
+### Direct USB Backend Issues
+
+**"No YubiKey found"**
+
+Check USB connection and permissions:
+
+```bash
+lsusb | grep Yubi                          # Check USB enumeration
+ls -la /dev/bus/usb/*/*                    # Check USB device permissions
+```
+
+On Linux, ensure udev rules allow USB access for the user running the proxy:
+
+```bash
+# /etc/udev/rules.d/70-yubikey.rules
+SUBSYSTEM=="usb", ATTR{idVendor}=="1050", MODE="0666"
+```
+
+**"Failed to claim interface"**
+
+Another process (like pcscd) may have claimed the YubiKey. Stop pcscd before using direct-usb:
+
+```bash
+killall pcscd
+```
+
+### PC/SC Backend Issues
+
+**"The Smart card resource manager has shut down"**
 
 pcsc-lite library version mismatch. Ensure using 2.3.3 with Entware's pcscd 2.3.3.
 
-### "supplied handle was invalid"
+**"supplied handle was invalid"**
 
 Timing issue — pcscd not fully initialized. Wait 2-3 seconds after starting pcscd before starting proxy.
 
-### Signature invalid after remote signing
+### General Issues
+
+**Signature invalid after remote signing**
 
 Ensure client sends TBS hash (hash of authenticated attributes), not PE hash. The fix was implemented in `compute_tbs_hash()`.
 
-### YubiKey not detected
+**YubiKey not detected**
 
 ```bash
 lsusb | grep Yubi                          # Check USB
-ps | grep pcscd                            # Check daemon
 echo 1 > /sys/bus/usb/devices/*/bConfigurationValue  # Reconfigure USB
+```
+
+## Implementation Notes
+
+### Direct USB Backend
+
+The direct-usb backend implements the USB CCID (Chip Card Interface Device) protocol to communicate directly with the YubiKey without any middleware:
+
+1. **USB Discovery**: Scans for Yubico VID (`0x1050`) with known PIDs
+2. **CCID Transport**: Uses 10-byte PC_to_RDR_XfrBlock headers for sending APDUs
+3. **PIV Application**: Selects PIV AID (`A0 00 00 03 08`) and executes:
+   - VERIFY PIN (INS 0x20)
+   - GET DATA for certificate retrieval
+   - GENERAL AUTHENTICATE (INS 0x87) for signing
+
+This eliminates the entire PC/SC stack:
+
+```text
+Traditional:  App → libpcsclite → pcscd → libccid → USB → YubiKey
+Direct USB:   App → rusb → USB → YubiKey
 ```
 
 ## Future Improvements
 
-1. **Eliminate pcscd** — Use direct USB/CCID or `yubico-piv-tool` FFI
-2. **Fully static binary** — Embed libpcsclite, no separate library files
-3. **Generic deployment** — Self-contained tarball with auto-detection
+1. ~~Eliminate pcscd~~ ✅ **Done** — Direct USB/CCID backend implemented
+2. **HSM support** — Support other hardware security modules via PKCS#11
+3. **Certificate caching** — Cache certificate to reduce YubiKey operations

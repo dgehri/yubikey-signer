@@ -178,7 +178,8 @@ impl PivSlot {
         self.0
     }
 
-    /// Get the slot as a `YubiKey` `SlotId` enum
+    /// Get the slot as a `YubiKey` `SlotId` enum (only available with pcsc-backend feature).
+    #[cfg(feature = "pcsc-backend")]
     #[must_use]
     pub fn as_slot_id(&self) -> yubikey::piv::SlotId {
         match self.0 {

@@ -18,6 +18,32 @@ use openssl::asn1::Asn1Object;
 use openssl::x509::X509;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 
+/// Context for remote signing that preserves authenticated attributes.
+///
+/// This struct holds all the data computed during `compute_tbs_hash_with_context()`
+/// that needs to be reused when calling `create_signed_pe_with_context()`.
+/// This ensures the signingTime and other attributes are identical between
+/// hash computation and signature embedding.
+#[derive(Clone)]
+pub struct TbsContext {
+    /// The hash that needs to be signed (hash of authenticated attributes SET).
+    pub tbs_hash: Vec<u8>,
+    /// The PE hash.
+    pe_hash: Vec<u8>,
+    /// The SPC indirect data content (DER-encoded).
+    spc_content: Vec<u8>,
+    /// The authenticated attributes for embedding ([0] IMPLICIT tagged).
+    a0_der: Vec<u8>,
+}
+
+impl TbsContext {
+    /// Get the TBS hash that should be sent to the remote signer.
+    #[must_use]
+    pub fn tbs_hash(&self) -> &[u8] {
+        &self.tbs_hash
+    }
+}
+
 /// OpenSSL-based Authenticode signer implementation
 pub struct OpenSslAuthenticodeSigner {
     certificate: X509,
@@ -127,20 +153,48 @@ impl OpenSslAuthenticodeSigner {
     ///
     /// # Errors
     /// Returns error if PE parsing or hash computation fails.
+    #[deprecated(
+        since = "0.5.1",
+        note = "Use compute_tbs_hash_with_context() for remote signing to ensure consistent signingTime"
+    )]
     pub fn compute_tbs_hash(&self, pe_data: &[u8]) -> SigningResult<Vec<u8>> {
+        Ok(self.compute_tbs_hash_with_context(pe_data)?.tbs_hash)
+    }
+
+    /// Compute the "to-be-signed" hash and context for remote signing.
+    ///
+    /// This method returns both the hash and a context object that must be
+    /// passed to `create_signed_pe_with_context()` to ensure the authenticated
+    /// attributes (including signingTime) are identical between hash computation
+    /// and signature embedding.
+    ///
+    /// # Arguments
+    /// * `pe_data` - The original PE file bytes
+    ///
+    /// # Returns
+    /// A `TbsContext` containing the hash and all data needed for embedding
+    ///
+    /// # Errors
+    /// Returns error if PE parsing or hash computation fails.
+    pub fn compute_tbs_hash_with_context(&self, pe_data: &[u8]) -> SigningResult<TbsContext> {
         let pe_hash = self.compute_pe_hash(pe_data)?;
         let spc_content_domain = self.build_spc_indirect_data(&pe_hash)?;
         let spc_content = spc_content_domain.as_der();
         let authenticated_attrs =
             self.create_authenticated_attributes(&pe_hash, spc_content, None, pe_data)?;
-        let (set_der, _a0_der) = self.build_tbs_and_embedding_data(&authenticated_attrs)?;
+        let (set_der, a0_der) = self.build_tbs_and_embedding_data(&authenticated_attrs)?;
         let tbs_hash = self.hash_data(&set_der)?;
         log::debug!(
             "Computed TBS hash: {} bytes (PE hash was {} bytes)",
             tbs_hash.len(),
             pe_hash.len()
         );
-        Ok(tbs_hash)
+        Ok(TbsContext {
+            tbs_hash,
+            pe_hash,
+            spc_content: spc_content.to_vec(),
+            a0_der,
+        })
     }
 
     fn build_spc_indirect_data(&self, pe_hash: &[u8]) -> SigningResult<crate::SpcIndirectData> {
@@ -288,12 +342,18 @@ impl OpenSslAuthenticodeSigner {
     ///
     /// # Errors
     /// Returns error if PKCS7 assembly or PE embedding fails.
+    #[deprecated(
+        since = "0.5.1",
+        note = "Use create_signed_pe_with_context() for remote signing to ensure consistent signingTime"
+    )]
     pub fn create_signed_pe_with_raw_signature(
         &self,
         original_pe: &[u8],
         raw_signature: &[u8],
         timestamp_token: Option<&[u8]>,
     ) -> SigningResult<Vec<u8>> {
+        // This regenerates authenticated attributes, which causes signingTime mismatch!
+        // Use create_signed_pe_with_context() instead.
         let _pe_info = pe::parse_pe(original_pe)?;
         let pe_hash = self.compute_pe_hash(original_pe)?;
         let spc_content_domain = self.build_spc_indirect_data(&pe_hash)?;
@@ -308,6 +368,60 @@ impl OpenSslAuthenticodeSigner {
         )?;
         let (_set_der, a0_der) = self.build_tbs_and_embedding_data(&authenticated_attrs)?;
 
+        self.build_signed_pe_internal(
+            original_pe,
+            &pe_hash,
+            spc_content,
+            &a0_der,
+            raw_signature,
+            timestamp_token,
+        )
+    }
+
+    /// Create a signed PE file using a pre-computed context and raw signature.
+    ///
+    /// This method uses the context from `compute_tbs_hash_with_context()` to ensure
+    /// the authenticated attributes (including signingTime) are identical to those
+    /// that were hashed and signed.
+    ///
+    /// # Arguments
+    /// * `original_pe` - The original PE file bytes
+    /// * `context` - The TBS context from `compute_tbs_hash_with_context()`
+    /// * `raw_signature` - The raw signature bytes from the remote signer
+    /// * `timestamp_token` - Optional timestamp token
+    ///
+    /// # Returns
+    /// The signed PE file bytes
+    ///
+    /// # Errors
+    /// Returns error if PKCS7 assembly or PE embedding fails.
+    pub fn create_signed_pe_with_context(
+        &self,
+        original_pe: &[u8],
+        context: &TbsContext,
+        raw_signature: &[u8],
+        timestamp_token: Option<&[u8]>,
+    ) -> SigningResult<Vec<u8>> {
+        self.build_signed_pe_internal(
+            original_pe,
+            &context.pe_hash,
+            &context.spc_content,
+            &context.a0_der,
+            raw_signature,
+            timestamp_token,
+        )
+    }
+
+    /// Internal method to build the signed PE with provided components.
+    fn build_signed_pe_internal(
+        &self,
+        original_pe: &[u8],
+        pe_hash: &[u8],
+        spc_content: &[u8],
+        a0_der: &[u8],
+        raw_signature: &[u8],
+        timestamp_token: Option<&[u8]>,
+    ) -> SigningResult<Vec<u8>> {
         // Build PKCS7 with the provided raw signature
         let cert_der = self.certificate.to_der().map_err(|e| {
             SigningError::CryptographicError(format!("Failed to get cert DER: {e}"))
@@ -319,7 +433,7 @@ impl OpenSslAuthenticodeSigner {
         );
 
         let pkcs7_der = pkcs7_service
-            .build_signed_with_timestamp(spc_content, &a0_der, raw_signature, timestamp_token)?
+            .build_signed_with_timestamp(spc_content, a0_der, raw_signature, timestamp_token)?
             .as_der()
             .to_vec();
         let pkcs7_trimmed = Self::trim_top_level_der(&pkcs7_der)?;
@@ -335,7 +449,7 @@ impl OpenSslAuthenticodeSigner {
         // Embed signature in PE
         let unsigned = crate::domain::pe::UnsignedPeFile::new(original_pe.to_vec())?;
         let embedder = PeSignatureEmbedderService::new();
-        let signed_pe_domain = embedder.embed(&unsigned, &pkcs7_domain, &pe_hash)?;
+        let signed_pe_domain = embedder.embed(&unsigned, &pkcs7_domain, pe_hash)?;
         Ok(signed_pe_domain.into_bytes())
     }
 

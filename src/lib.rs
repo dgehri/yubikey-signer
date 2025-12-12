@@ -55,15 +55,19 @@ pub use crate::domain::spc::SpcIndirectData;
 // Core API exports - maintain backward compatibility
 pub use crate::domain::types::{HashData, PivPin, PivSlot, SecurePath, TimestampUrl};
 pub use crate::infra::error::{SigningError, SigningResult};
+#[cfg(feature = "pcsc-backend")]
 pub use crate::pipelines::sign::SignWorkflow;
 
-// Public API exports - stable interfaces for external use
+// Public API exports - stable interfaces for external use (requires pcsc-backend)
+#[cfg(feature = "pcsc-backend")]
 pub use crate::adapters::yubikey::auth_bridge::{
     sign_pe_file_with_yubikey_openssl, sign_pe_with_yubikey_openssl, YubiKeyAuthenticodeBridge,
 };
+#[cfg(feature = "pcsc-backend")]
 pub use crate::adapters::yubikey::ops::YubiKeyOperations;
 pub use crate::domain::verification::VerificationReport;
 pub use crate::services::authenticode::OpenSslAuthenticodeSigner;
+#[cfg(feature = "pcsc-backend")]
 pub use crate::services::signing::{Signer, SigningDetails, SigningOptions};
 pub use crate::services::timestamp::TimestampClient;
 
@@ -132,7 +136,8 @@ impl FromStr for HashAlgorithm {
     }
 }
 
-/// Main signing function - signs a PE file using `YubiKey`
+/// Main signing function - signs a PE file using `YubiKey` (requires pcsc-backend feature)
+#[cfg(feature = "pcsc-backend")]
 pub async fn sign_pe_file<P: AsRef<Path>>(
     input_path: P,
     output_path: P,

@@ -81,6 +81,18 @@ services:
       - cargo-git:/root/.cargo/git
     working_dir: /workspace
 
+  # Build aarch64 musl with DIRECT USB support (NO pcscd required!)
+  # This is the recommended build for embedded systems and routers
+  build-aarch64-direct-usb:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-direct-usb
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
 volumes:
   cargo-cache:
   cargo-git:

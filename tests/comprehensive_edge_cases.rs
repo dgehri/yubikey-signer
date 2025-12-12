@@ -1,7 +1,11 @@
 //! Comprehensive edge case tests for `YubiKey` PE Signer
 //!
-//! This test suite covers all edge cases and error conditions to en            Ok(_) => println!("YubiKey connected");ure
+//! This test suite covers all edge cases and error conditions to ensure
 //! robust production behavior.
+//!
+//! NOTE: These tests require the `pcsc-backend` feature to be enabled.
+
+#![cfg(feature = "pcsc-backend")]
 
 use std::env;
 use std::path::Path;
