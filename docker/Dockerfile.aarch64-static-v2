@@ -1,0 +1,67 @@
+# Dockerfile for cross-compiling yubikey-proxy to aarch64-unknown-linux-musl
+# This creates a dynamically linked binary with pcsc-lite 2.3.3 compiled for musl
+# Uses meson build system to match Entware's pcsc-lite version
+# 
+# Usage:
+#   docker compose -f docker/docker-compose.yml run --rm build-aarch64-static-v2
+#
+
+FROM messense/rust-musl-cross:aarch64-musl
+
+# Install build dependencies including meson/ninja for pcsc-lite 2.3+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    perl \
+    xz-utils \
+    meson \
+    ninja-build \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a meson cross-compilation file for aarch64-musl
+RUN cat > /tmp/aarch64-musl-cross.txt << 'EOF'
+[binaries]
+c = 'aarch64-unknown-linux-musl-gcc'
+cpp = 'aarch64-unknown-linux-musl-g++'
+ar = 'aarch64-unknown-linux-musl-ar'
+strip = 'aarch64-unknown-linux-musl-strip'
+pkgconfig = 'pkg-config'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+EOF
+
+# Download and cross-compile pcsc-lite 2.3.3 for musl
+# Configure with the ACTUAL Entware socket path: /tmp/mnt/entware/entware/var/run/pcscd
+ENV PCSC_VERSION=2.3.3
+RUN cd /tmp && \
+    curl -sSL https://pcsclite.apdu.fr/files/pcsc-lite-${PCSC_VERSION}.tar.xz | tar xJ && \
+    cd pcsc-lite-${PCSC_VERSION} && \
+    meson setup builddir \
+        --cross-file /tmp/aarch64-musl-cross.txt \
+        --prefix=/usr/local/musl/aarch64-unknown-linux-musl \
+        -Ddefault_library=shared \
+        -Dlibsystemd=false \
+        -Dlibudev=false \
+        -Dlibusb=false \
+        -Dpolkit=false \
+        -Dipcdir=/tmp/mnt/entware/entware/var/run/pcscd && \
+    ninja -C builddir && \
+    ninja -C builddir install && \
+    cd / && rm -rf /tmp/pcsc-lite-${PCSC_VERSION}
+
+WORKDIR /workspace
+
+# Build with dynamic linking (the binary needs libpcsclite.so at runtime)
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="aarch64-unknown-linux-musl-gcc"
+
+# Default command: build the proxy binary using a separate target dir
+CMD ["cargo", "build", "--release", "--target", "aarch64-unknown-linux-musl", \
+     "--target-dir", "/workspace/target-docker", \
+     "--features", "vendored-openssl,proxy-server", \
+     "-p", "yubikey-signer", "--bin", "yubikey-proxy"]

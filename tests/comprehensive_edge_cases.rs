@@ -1,7 +1,11 @@
 //! Comprehensive edge case tests for `YubiKey` PE Signer
 //!
-//! This test suite covers all edge cases and error conditions to en            Ok(_) => println!("YubiKey connected");ure
+//! This test suite covers all edge cases and error conditions to ensure
 //! robust production behavior.
+//!
+//! NOTE: These tests require the `pcsc-backend` feature to be enabled.
+
+#![cfg(feature = "pcsc-backend")]
 
 use std::env;
 use std::path::Path;
@@ -172,8 +176,8 @@ mod yubikey_hardware_tests {
             let pin = PivPin::new(pin_str).expect("Valid PIN format but wrong value");
             let result = ops.authenticate(&pin);
             // Should fail (unless user actually uses these pins!)
-            if result.is_err() {
-                let error_msg = format!("{}", result.unwrap_err());
+            if let Err(e) = result {
+                let error_msg = format!("{e}");
                 assert!(error_msg.contains("PIN") || error_msg.contains("auth"));
             }
         }
@@ -194,8 +198,8 @@ mod yubikey_hardware_tests {
             if let Ok(slot) = PivSlot::new(slot_num) {
                 let result = ops.get_certificate(slot);
                 // Should fail gracefully for invalid slots
-                if result.is_err() {
-                    let error_msg = format!("{}", result.unwrap_err());
+                if let Err(e) = result {
+                    let error_msg = format!("{e}");
                     assert!(error_msg.contains("slot") || error_msg.contains("certificate"));
                 }
             } else {
