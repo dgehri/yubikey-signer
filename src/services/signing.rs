@@ -233,7 +233,7 @@ impl Signer {
             if self.options.verbose && !warnings.is_empty() {
                 log::warn!("Certificate validation warnings:");
                 for warning in &warnings {
-                    log::warn!("  ⚠️  {warning}");
+                    log::warn!("  [!] {warning}");
                 }
             }
         }
@@ -331,7 +331,7 @@ impl Signer {
 
         if self.options.verbose {
             log::info!(
-                "✅ Signing completed successfully in {:.2}s",
+                "[+] Signing completed successfully in {:.2}s",
                 duration.as_secs_f64()
             );
             log::info!("  File size: {file_size} bytes");
@@ -371,16 +371,16 @@ impl Signer {
             } else if self.options.auto_detect_fallback {
                 if self.options.verbose {
                     log::warn!(
-                        "⚠️  Certificate in slot {actual_slot} is not suitable for code signing"
+                        "[!] Certificate in slot {actual_slot} is not suitable for code signing"
                     );
-                    log::info!("🔍 Running auto-detection to find suitable certificate...");
+                    log::info!("[*] Running auto-detection to find suitable certificate...");
                 }
 
                 // Simplified auto-detection - just use discovery capabilities
                 let discovery_results = AutoDetection::discover_yubikey_capabilities(yubikey_ops)?;
                 if let Some(&suitable_slot) = discovery_results.suitable_slots.first() {
                     if self.options.verbose {
-                        log::info!("✅ Found suitable certificate in slot: {suitable_slot}");
+                        log::info!("[+] Found suitable certificate in slot: {suitable_slot}");
                     }
                     *actual_slot = suitable_slot;
 

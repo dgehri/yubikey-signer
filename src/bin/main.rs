@@ -308,7 +308,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     };
 
     if args.dry_run {
-        println!("🔍 Dry run mode - validating configuration");
+        println!("[*] Dry run mode - validating configuration");
         println!("  Input file: {}", args.input_file.display());
         println!("  Output file: {}", output_path.display());
         println!("  PIV slot: {}", signing_config.piv_slot);
@@ -317,13 +317,13 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
         } else {
             println!("  Timestamp: disabled");
         }
-        println!("✅ Configuration is valid");
+        println!("[+] Configuration is valid");
         return Ok(());
     }
 
     if args.verbose {
         println!(
-            "🔐 Signing {} with YubiKey slot {}",
+            "[*] Signing {} with YubiKey slot {}",
             args.input_file.display(),
             signing_config.piv_slot
         );
@@ -339,7 +339,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     {
         Ok(()) => {
             let duration = start_time.elapsed();
-            println!("✅ File signed successfully!");
+            println!("[+] File signed successfully!");
             if args.verbose {
                 println!("  Duration: {:.2}s", duration.as_secs_f64());
                 let file_size = std::fs::metadata(&output_path)
@@ -353,7 +353,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
             }
         }
         Err(e) => {
-            eprintln!("❌ Signing failed: {e}");
+            eprintln!("[!] Signing failed: {e}");
             std::process::exit(1);
         }
     }
@@ -363,7 +363,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
 
 async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
     if verbose {
-        println!("🔍 Discovering YubiKey certificates and capabilities...");
+        println!("[*] Discovering YubiKey certificates and capabilities...");
     }
 
     // Check if YUBICO_PIN is set for authentication
@@ -397,28 +397,28 @@ async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
         );
 
         if let Some(recommended) = discovery.recommended_slot {
-            println!("  🏆 Recommended slot: {recommended}");
+            println!("  [*] Recommended slot: {recommended}");
         }
 
-        println!("\n📋 Slot Analysis:");
+        println!("\n[*] Slot Analysis:");
         for slot_info in &discovery.slots {
             print!("  Slot {}: ", slot_info.slot);
 
             if slot_info.has_certificate {
                 if let Some(ref analysis) = slot_info.certificate_analysis {
                     if analysis.is_code_signing_suitable {
-                        println!("✅ Suitable for code signing");
+                        println!("[+] Suitable for code signing");
                         if detailed {
                             println!("    Subject: {}", analysis.subject);
                             println!("    Days until expiry: {}", analysis.days_until_expiry);
                             if !analysis.warnings.is_empty() {
                                 for warning in &analysis.warnings {
-                                    println!("    ⚠️  {warning}");
+                                    println!("    [!] {warning}");
                                 }
                             }
                         }
                     } else {
-                        println!("❌ Not suitable for code signing");
+                        println!("[!] Not suitable for code signing");
                         if detailed {
                             for warning in &analysis.warnings {
                                 println!("    - {warning}");
@@ -426,21 +426,21 @@ async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
                         }
                     }
                 } else {
-                    println!("❓ Certificate analysis failed");
+                    println!("[?] Certificate analysis failed");
                 }
             } else {
-                println!("⭕ No certificate");
+                println!("[-] No certificate");
             }
         }
 
         if !discovery.warnings.is_empty() && verbose {
-            println!("\n⚠️  Discovery Warnings:");
+            println!("\n[!] Discovery Warnings:");
             for warning in &discovery.warnings {
                 println!("  - {warning}");
             }
         }
     } else {
-        println!("ℹ️  Set YUBICO_PIN environment variable for full discovery with authentication");
+        println!("[i] Set YUBICO_PIN environment variable for full discovery with authentication");
         println!("   Basic slot enumeration only (no certificate analysis):");
 
         // Basic enumeration without PIN
@@ -486,7 +486,7 @@ async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
         ConfigCommands::Init => {
             let _config = config_manager.load_or_create_default().into_diagnostic()?;
             println!(
-                "✅ Configuration initialized: {}",
+                "[+] Configuration initialized: {}",
                 config_manager.config_path().display()
             );
             println!("   Edit the file to customize settings, or use 'config set' commands.");
@@ -496,7 +496,7 @@ async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
             config_manager
                 .update_value(&key, &value)
                 .into_diagnostic()?;
-            println!("✅ Configuration updated: {key} = {value}");
+            println!("[+] Configuration updated: {key} = {value}");
         }
 
         ConfigCommands::Export { format, output } => {
@@ -506,7 +506,7 @@ async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
 
             if let Some(output_path) = output {
                 std::fs::write(&output_path, content).into_diagnostic()?;
-                println!("✅ Configuration exported to: {}", output_path.display());
+                println!("[+] Configuration exported to: {}", output_path.display());
             } else {
                 println!("{content}");
             }
@@ -517,7 +517,7 @@ async fn handle_config_command(config_cmd: ConfigCommands) -> Result<()> {
             config_manager
                 .import_config(&content, format.into())
                 .into_diagnostic()?;
-            println!("✅ Configuration imported from: {}", file.display());
+            println!("[+] Configuration imported from: {}", file.display());
         }
     }
 
@@ -599,7 +599,7 @@ async fn handle_remote_sign(
     let extra_headers = parse_headers(&args.headers)?;
 
     if args.verbose {
-        println!("🌐 Remote signing via {remote_url}");
+        println!("[*] Remote signing via {remote_url}");
         println!("  Input file: {}", args.input_file.display());
         println!("  Output file: {}", output_path.display());
         println!("  PIV slot: {piv_slot}");
@@ -609,7 +609,7 @@ async fn handle_remote_sign(
     }
 
     if args.dry_run {
-        println!("🔍 Dry run mode - validating remote configuration");
+        println!("[*] Dry run mode - validating remote configuration");
         println!("  Remote URL: {remote_url}");
         println!("  PIV slot: {piv_slot}");
 
@@ -623,7 +623,7 @@ async fn handle_remote_sign(
         if let Some(serial) = status.serial {
             println!("  Serial: {serial}");
         }
-        println!("✅ Remote configuration is valid");
+        println!("[+] Remote configuration is valid");
         return Ok(());
     }
 
@@ -640,7 +640,7 @@ async fn handle_remote_sign(
 
     // Get certificate from remote YubiKey
     if args.verbose {
-        println!("📜 Fetching certificate from remote YubiKey...");
+        println!("[*] Fetching certificate from remote YubiKey...");
     }
     let cert_der = client.get_certificate(piv_slot).await.into_diagnostic()?;
 
@@ -653,7 +653,7 @@ async fn handle_remote_sign(
     // This computes the authenticated attributes and preserves them for later embedding.
     // Using context ensures the signingTime is identical in hash computation and final PKCS7.
     if args.verbose {
-        println!("🔢 Computing TBS hash (authenticated attributes)...");
+        println!("[*] Computing TBS hash (authenticated attributes)...");
     }
     let tbs_context = openssl_signer
         .compute_tbs_hash_with_context(&pe_data)
@@ -661,7 +661,7 @@ async fn handle_remote_sign(
 
     // Sign TBS hash remotely
     if args.verbose {
-        println!("✍️  Signing TBS hash remotely...");
+        println!("[*] Signing TBS hash remotely...");
     }
     let signature = client
         .sign_hash(&tbs_context.tbs_hash, piv_slot)
@@ -670,13 +670,13 @@ async fn handle_remote_sign(
 
     // Build PKCS7 locally with remote signature
     if args.verbose {
-        println!("📦 Building PKCS7 structure...");
+        println!("[*] Building PKCS7 structure...");
     }
 
     // Get timestamp if requested
     let timestamp_token = if let Some(ref ts_url) = args.timestamp {
         if args.verbose {
-            println!("⏱️  Fetching timestamp from {ts_url}...");
+            println!("[*] Fetching timestamp from {ts_url}...");
         }
         let ts_url_typed = TimestampUrl::new(ts_url).into_diagnostic()?;
         let ts_client = TimestampClient::new(&ts_url_typed);
@@ -707,7 +707,7 @@ async fn handle_remote_sign(
         .context("Failed to write output file")?;
 
     let duration = start_time.elapsed();
-    println!("✅ File signed successfully (remote)!");
+    println!("[+] File signed successfully (remote)!");
     if args.verbose {
         println!("  Duration: {:.2}s", duration.as_secs_f64());
         println!("  File size: {} bytes", signed_pe.len());

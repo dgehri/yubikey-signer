@@ -34,7 +34,7 @@ impl AutoDetection {
     pub fn discover_yubikey_capabilities(
         yubikey_ops: &mut YubiKeyOperations,
     ) -> SigningResult<DiscoveryResults> {
-        log::info!("🔍 Starting YubiKey auto-detection and analysis");
+        log::info!("[*] Starting YubiKey auto-detection and analysis");
 
         let mut results = DiscoveryResults {
             slots: Vec::new(),
@@ -60,10 +60,10 @@ impl AutoDetection {
                 if let Some(ref analysis) = slot_info.certificate_analysis {
                     if analysis.is_code_signing_suitable {
                         results.suitable_slots.push(slot);
-                        log::info!("✅ Slot {slot} is suitable for code signing");
+                        log::info!("[+] Slot {slot} is suitable for code signing");
                     } else {
                         log::warn!(
-                            "⚠️  Slot {slot} has certificate but not suitable for code signing"
+                            "[!] Slot {slot} has certificate but not suitable for code signing"
                         );
                         for warning in &analysis.warnings {
                             results.warnings.push(format!("Slot {slot}: {warning}"));
@@ -106,7 +106,7 @@ impl AutoDetection {
 
         match yubikey_ops.get_certificate(slot) {
             Ok(certificate) => {
-                log::debug!("✅ Certificate found in slot {slot}");
+                log::debug!("[+] Certificate found in slot {slot}");
 
                 match CertificateValidator::validate_for_code_signing(&certificate) {
                     Ok(analysis) => SlotInfo {
@@ -117,7 +117,7 @@ impl AutoDetection {
                         error: None,
                     },
                     Err(e) => {
-                        log::warn!("❌ Certificate analysis failed for slot {slot}: {e}");
+                        log::warn!("[!] Certificate analysis failed for slot {slot}: {e}");
                         SlotInfo {
                             slot,
                             has_certificate: true,
@@ -129,7 +129,7 @@ impl AutoDetection {
                 }
             }
             Err(e) => {
-                log::debug!("❌ No certificate or access error in slot {slot}: {e}");
+                log::debug!("[!] No certificate or access error in slot {slot}: {e}");
                 SlotInfo {
                     slot,
                     has_certificate: false,
@@ -250,7 +250,7 @@ impl AutoDetection {
         yubikey_ops: &mut YubiKeyOperations,
         current_slot: PivSlot,
     ) -> SigningResult<Vec<PivSlot>> {
-        log::info!("🔍 Finding alternative slots to {current_slot}");
+        log::info!("[*] Finding alternative slots to {current_slot}");
 
         let discovery = Self::discover_yubikey_capabilities(yubikey_ops)?;
         let mut alternatives: Vec<PivSlot> = discovery
@@ -310,11 +310,11 @@ pub enum RecommendationLevel {
 impl std::fmt::Display for RecommendationLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RecommendationLevel::Recommended => write!(f, "✅ Recommended"),
-            RecommendationLevel::Caution => write!(f, "⚠️  Use with caution"),
-            RecommendationLevel::NotRecommended => write!(f, "❌ Not recommended"),
-            RecommendationLevel::Unknown => write!(f, "❓ Unknown"),
-            RecommendationLevel::NotAvailable => write!(f, "⭕ Not available"),
+            RecommendationLevel::Recommended => write!(f, "[+] Recommended"),
+            RecommendationLevel::Caution => write!(f, "[!] Use with caution"),
+            RecommendationLevel::NotRecommended => write!(f, "[!] Not recommended"),
+            RecommendationLevel::Unknown => write!(f, "[?] Unknown"),
+            RecommendationLevel::NotAvailable => write!(f, "[-] Not available"),
         }
     }
 }
