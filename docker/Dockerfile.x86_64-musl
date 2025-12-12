@@ -1,14 +1,14 @@
-# Dockerfile for cross-compiling yubikey-proxy to aarch64-unknown-linux-musl
-# This creates a dynamically linked binary that depends on libpcsclite.so at runtime
-# 
-# Usage:
-#   docker compose -f docker/docker-compose.yml run --rm build
+# Dockerfile for building yubikey-signer on x86_64-unknown-linux-musl
+# This creates a statically linked binary that's portable across Linux distros
 #
-# Or manually:
-#   docker build -f docker/Dockerfile.aarch64-musl -t yubikey-signer-cross .
-#   docker run --rm -v ${PWD}:/workspace yubikey-signer-cross
+# The binary links against musl libc and uses vendored OpenSSL.
+# At runtime, it requires libpcsclite.so (pcscd) on the target system.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml run --rm build-x86_64-musl
+#
 
-FROM messense/rust-musl-cross:aarch64-musl
+FROM messense/rust-musl-cross:x86_64-musl
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,19 +18,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy PCSC headers to musl sysroot (headers are arch-independent)
-RUN cp /usr/include/PCSC/* /usr/local/musl/aarch64-unknown-linux-musl/include/
+RUN cp /usr/include/PCSC/* /usr/local/musl/x86_64-unknown-linux-musl/include/
 
 # Copy pkgconfig file to musl sysroot and fix paths
 RUN cp /usr/lib/x86_64-linux-gnu/pkgconfig/libpcsclite.pc \
-    /usr/local/musl/aarch64-unknown-linux-musl/lib/pkgconfig/ && \
-    sed -i 's|/usr/lib/x86_64-linux-gnu|/usr/local/musl/aarch64-unknown-linux-musl/lib|g' \
-    /usr/local/musl/aarch64-unknown-linux-musl/lib/pkgconfig/libpcsclite.pc && \
-    sed -i 's|/usr/include/PCSC|/usr/local/musl/aarch64-unknown-linux-musl/include|g' \
-    /usr/local/musl/aarch64-unknown-linux-musl/lib/pkgconfig/libpcsclite.pc
+    /usr/local/musl/x86_64-unknown-linux-musl/lib/pkgconfig/ && \
+    sed -i 's|/usr/lib/x86_64-linux-gnu|/usr/local/musl/x86_64-unknown-linux-musl/lib|g' \
+    /usr/local/musl/x86_64-unknown-linux-musl/lib/pkgconfig/libpcsclite.pc && \
+    sed -i 's|/usr/include/PCSC|/usr/local/musl/x86_64-unknown-linux-musl/include|g' \
+    /usr/local/musl/x86_64-unknown-linux-musl/lib/pkgconfig/libpcsclite.pc
 
 # Create a stub shared library with the required symbols for pcsclite
 # The actual library will be loaded at runtime on the target system
-# Note: g_rgSCardT0Pci, g_rgSCardT1Pci, g_rgSCardRawPci are required global variables
 RUN echo '#include <stddef.h> \n\
 /* SCARD_IO_REQUEST structure - 8 bytes on most platforms */ \n\
 typedef struct { unsigned long dwProtocol; unsigned long cbPciLength; } SCARD_IO_REQUEST; \n\
@@ -58,18 +57,21 @@ long SCardSetAttrib(unsigned long a, unsigned long b, void* c, unsigned long d) 
 long SCardReconnect(unsigned long a, unsigned long b, unsigned long c, unsigned long d, void* e) { return 0; } \n\
 long SCardIsValidContext(unsigned long a) { return 0; } \n\
 const char* pcsc_stringify_error(long a) { return "stub"; }' > /tmp/pcsclite_stub.c && \
-    aarch64-unknown-linux-musl-gcc -shared -fPIC -o /usr/local/musl/aarch64-unknown-linux-musl/lib/libpcsclite.so.1 /tmp/pcsclite_stub.c && \
-    ln -sf libpcsclite.so.1 /usr/local/musl/aarch64-unknown-linux-musl/lib/libpcsclite.so && \
+    x86_64-unknown-linux-musl-gcc -shared -fPIC -o /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so.1 /tmp/pcsclite_stub.c && \
+    ln -sf libpcsclite.so.1 /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so && \
     rm /tmp/pcsclite_stub.c
 
 WORKDIR /workspace
 
-# Build with dynamic linking (required for pcsclite which doesn't have static lib in musl)
+# Build with dynamic linking for pcsclite (loaded at runtime)
 ENV RUSTFLAGS="-C target-feature=-crt-static"
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="aarch64-unknown-linux-musl-gcc"
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="x86_64-unknown-linux-musl-gcc"
 
-# Default command: build the proxy binary using a separate target dir to avoid rust-analyzer lock conflicts
-CMD ["cargo", "build", "--release", "--target", "aarch64-unknown-linux-musl", \
-     "--target-dir", "/workspace/target-docker", \
-     "--features", "vendored-openssl,proxy-server", \
-     "-p", "yubikey-signer", "--bin", "yubikey-proxy"]
+# Default command: build both yubikey-signer and yubikey-proxy
+CMD ["sh", "-c", "\
+    cargo build --release --target x86_64-unknown-linux-musl \
+        --target-dir /workspace/target-docker \
+        --features 'vendored-openssl' && \
+    cargo build --release --target x86_64-unknown-linux-musl \
+        --target-dir /workspace/target-docker \
+        --features 'vendored-openssl,proxy-server'"]
