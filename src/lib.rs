@@ -132,12 +132,47 @@ impl FromStr for HashAlgorithm {
     }
 }
 
-/// `Data` signing function - signs PE data (file) using `YubiKey`
+/// Signs PE data in-memory using a `YubiKey`.
+///
+/// This function takes PE file contents as a byte slice and returns the signed PE data.
+/// Useful when the file is already loaded in memory or received from another source.
+///
+/// # Arguments
+///
+/// * `input` - PE file data as any type implementing `AsRef<[u8]>` (e.g., `Vec<u8>`, `&[u8]`)
+/// * `config` - Signing configuration including PIN, slot, timestamp URL, and hash algorithm
+///
+/// # Returns
+///
+/// The signed PE file data as `Vec<u8>`, ready to be written to disk or transmitted.
+///
+/// # Errors
+///
+/// Returns `SigningError` if PE parsing, `YubiKey` operations, or signing fails.
+///
+/// # Example
+///
+/// ```no_run
+/// use yubikey_signer::{sign_pe_data, SigningConfig, PivPin, PivSlot};
+///
+/// # async fn example() -> yubikey_signer::SigningResult<()> {
+/// let pe_bytes = std::fs::read("unsigned.exe")?;
+/// let config = SigningConfig {
+///     pin: PivPin::new("123456")?,
+///     piv_slot: PivSlot::default(),
+///     ..Default::default()
+/// };
+/// let signed_bytes = sign_pe_data(&pe_bytes, config).await?;
+/// std::fs::write("signed.exe", signed_bytes)?;
+/// # Ok(())
+/// # }
+/// ```
+#[inline]
 pub async fn sign_pe_data<I: AsRef<[u8]>>(
     input: I,
     config: SigningConfig,
 ) -> SigningResult<Vec<u8>> {
-    // Get input file data as byte slice
+    // Get input data as byte slice
     let file_data = input.as_ref();
 
     // Validate it's a PE file before accessing hardware, so we fail fast
@@ -187,7 +222,37 @@ pub async fn sign_pe_data<I: AsRef<[u8]>>(
     )
 }
 
-/// File signing function - signs a PE file using `YubiKey`
+/// Signs a PE file on disk using a `YubiKey`.
+///
+/// Reads the input file, signs it, and writes the result to the output path.
+/// This is a convenience wrapper around [`sign_pe_data`] for file-based workflows.
+///
+/// # Arguments
+///
+/// * `input_path` - Path to the unsigned PE file
+/// * `output_path` - Path where the signed PE file will be written
+/// * `config` - Signing configuration including PIN, slot, timestamp URL, and hash algorithm
+///
+/// # Errors
+///
+/// Returns `SigningError` if file I/O, PE parsing, `YubiKey` operations, or signing fails.
+///
+/// # Example
+///
+/// ```no_run
+/// use yubikey_signer::{sign_pe_file, SigningConfig, PivPin, PivSlot};
+///
+/// # async fn example() -> yubikey_signer::SigningResult<()> {
+/// let config = SigningConfig {
+///     pin: PivPin::new("123456")?,
+///     piv_slot: PivSlot::default(),
+///     ..Default::default()
+/// };
+/// sign_pe_file("unsigned.exe", "signed.exe", config).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[inline]
 pub async fn sign_pe_file<P: AsRef<Path>>(
     input_path: P,
     output_path: P,
