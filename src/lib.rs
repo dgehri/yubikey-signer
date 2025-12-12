@@ -136,22 +136,53 @@ impl FromStr for HashAlgorithm {
     }
 }
 
-/// Main signing function - signs a PE file using `YubiKey` (requires pcsc-backend feature)
+/// Signs PE data in-memory using a `YubiKey`.
+///
+/// This function takes PE file contents as a byte slice and returns the signed PE data.
+/// Useful when the file is already loaded in memory or received from another source.
+///
+/// # Arguments
+///
+/// * `input` - PE file data as any type implementing `AsRef<[u8]>` (e.g., `Vec<u8>`, `&[u8]`)
+/// * `config` - Signing configuration including PIN, slot, timestamp URL, and hash algorithm
+///
+/// # Returns
+///
+/// The signed PE file data as `Vec<u8>`, ready to be written to disk or transmitted.
+///
+/// # Errors
+///
+/// Returns `SigningError` if PE parsing, `YubiKey` operations, or signing fails.
+///
+/// # Example
+///
+/// ```no_run
+/// use yubikey_signer::{sign_pe_data, SigningConfig, PivPin, PivSlot};
+///
+/// # async fn example() -> yubikey_signer::SigningResult<()> {
+/// let pe_bytes = std::fs::read("unsigned.exe")?;
+/// let config = SigningConfig {
+///     pin: PivPin::new("123456")?,
+///     piv_slot: PivSlot::default(),
+///     ..Default::default()
+/// };
+/// let signed_bytes = sign_pe_data(&pe_bytes, config).await?;
+/// std::fs::write("signed.exe", signed_bytes)?;
+/// # Ok(())
+/// # }
+/// ```
+#[inline]
 #[cfg(feature = "pcsc-backend")]
-pub async fn sign_pe_file<P: AsRef<Path>>(
-    input_path: P,
-    output_path: P,
+pub async fn sign_pe_data<I: AsRef<[u8]>>(
+    input: I,
     config: SigningConfig,
-) -> SigningResult<()> {
-    log::info!("Starting PE file signing process");
-
-    // Read input file
-    let file_data = std::fs::read(&input_path)
-        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+) -> SigningResult<Vec<u8>> {
+    // Get input data as byte slice
+    let file_data = input.as_ref();
 
     // Validate it's a PE file before accessing hardware, so we fail fast
     // with a clear PE parsing error on invalid inputs.
-    let _ = crate::domain::pe::layout::parse_pe(&file_data)?;
+    let _ = crate::domain::pe::layout::parse_pe(file_data)?;
 
     // Connect to YubiKey and authenticate
     let mut yubikey_ops = YubiKeyOperations::connect()?;
@@ -165,12 +196,8 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
     let signer = OpenSslAuthenticodeSigner::new(&certificate_der, config.hash_algorithm)?;
 
     // Compute PE hash for signing
-    let pe_hash = signer.compute_pe_hash(&file_data)?;
+    let pe_hash = signer.compute_pe_hash(file_data)?;
     log::debug!("Computed PE hash: {} bytes", pe_hash.len());
-
-    // Don't sign the hash directly - remove this line since bridge will handle it
-    // let signature = yubikey_ops.sign_hash(&pe_hash, config.piv_slot)?;
-    // log::info!("Created digital signature using YubiKey");
 
     // Get timestamp if requested
     let timestamp_token = if let Some(ts_url) = &config.timestamp_url {
@@ -188,15 +215,63 @@ pub async fn sign_pe_file<P: AsRef<Path>>(
         config.hash_algorithm,
     )?;
 
-    let signed_data = bridge.sign_pe_file(
-        &file_data,
+    bridge.sign_pe_file(
+        file_data,
         config.piv_slot,
         timestamp_token.as_deref(),
         config.embed_certificate,
-    )?;
+    )
+}
+
+/// Signs a PE file on disk using a `YubiKey`.
+///
+/// Reads the input file, signs it, and writes the result to the output path.
+/// This is a convenience wrapper around [`sign_pe_data`] for file-based workflows.
+///
+/// # Arguments
+///
+/// * `input_path` - Path to the unsigned PE file
+/// * `output_path` - Path where the signed PE file will be written
+/// * `config` - Signing configuration including PIN, slot, timestamp URL, and hash algorithm
+///
+/// # Errors
+///
+/// Returns `SigningError` if file I/O, PE parsing, `YubiKey` operations, or signing fails.
+///
+/// # Example
+///
+/// ```no_run
+/// use yubikey_signer::{sign_pe_file, SigningConfig, PivPin, PivSlot};
+///
+/// # async fn example() -> yubikey_signer::SigningResult<()> {
+/// let config = SigningConfig {
+///     pin: PivPin::new("123456")?,
+///     piv_slot: PivSlot::default(),
+///     ..Default::default()
+/// };
+/// sign_pe_file("unsigned.exe", "signed.exe", config).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[inline]
+#[cfg(feature = "pcsc-backend")]
+pub async fn sign_pe_file<P: AsRef<Path>>(
+    input_path: P,
+    output_path: P,
+    config: SigningConfig,
+) -> SigningResult<()> {
+    log::info!("Starting PE file signing process");
+
+    // Read input file
+    let file_data = tokio::fs::read(&input_path)
+        .await
+        .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+
+    let signed_data = sign_pe_data(&file_data, config).await?;
 
     // Write signed file
-    std::fs::write(&output_path, signed_data)
+    tokio::fs::write(&output_path, signed_data)
+        .await
         .map_err(|e| SigningError::IoError(format!("Failed to write output file: {e}")))?;
 
     log::info!("Successfully signed PE file: {:?}", output_path.as_ref());
