@@ -57,15 +57,14 @@ ENV PKG_CONFIG_LIBDIR="${MUSL_PREFIX}/lib/pkgconfig"
 # Setting both ensures it finds our cross-compiled library
 ENV LIBUSB_DIR="${MUSL_PREFIX}"
 
-# Also set library/include paths explicitly for the linker and compiler
-ENV LIBRARY_PATH="${MUSL_PREFIX}/lib"
-ENV CPATH="${MUSL_PREFIX}/include"
-ENV C_INCLUDE_PATH="${MUSL_PREFIX}/include"
-
 # Ensure static linking by setting the correct include path for libusb1-sys
 ENV LIBUSB_STATIC="1"
 ENV LIBUSB_INCLUDE_DIR="${MUSL_PREFIX}/include/libusb-1.0"
 ENV LIBUSB_LIB_DIR="${MUSL_PREFIX}/lib"
+
+# NOTE: We intentionally do NOT set LIBRARY_PATH, CPATH, C_INCLUDE_PATH globally
+# as those would interfere with host-side build script compilation.
+# Cargo's linker flags (RUSTFLAGS) handle the cross-compilation library paths.
 
 # Default command: build the proxy binary with direct-usb feature (no pcsc-backend)
 # Note: We use --no-default-features to avoid pulling in the yubikey crate's pcsc dependency
