@@ -5,8 +5,10 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
+# Note: We use a PAT (RELEASE_TOKEN) instead of GITHUB_TOKEN to push tags.
+# This is required because tags pushed via GITHUB_TOKEN do NOT trigger other
+# workflows (like the Release workflow). This is a GitHub security feature
+# to prevent infinite workflow loops.
 
 jobs:
   tag-on-version-bump:
@@ -17,6 +19,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # Use PAT for checkout so git push uses the same token
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Detect version bump and create tag
         id: autotag
