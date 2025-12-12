@@ -126,6 +126,12 @@ enum Commands {
         #[arg(long, value_name = "URL", env = "YUBIKEY_PROXY_URL")]
         remote: Option<String>,
 
+        /// Custom HTTP header for remote requests (can be repeated).
+        /// Format: "Header-Name: value"
+        /// Example: --header "CF-Access-Client-Id: xxx" --header "CF-Access-Client-Secret: yyy"
+        #[arg(long = "header", value_name = "HEADER", action = clap::ArgAction::Append)]
+        headers: Vec<String>,
+
         /// Dry run - validate configuration without signing
         #[arg(long)]
         dry_run: bool,
@@ -211,6 +217,7 @@ struct SignCommandArgs {
     slot: String,
     timestamp: Option<String>,
     remote: Option<String>,
+    headers: Vec<String>,
     dry_run: bool,
     verbose: bool,
 }
@@ -234,6 +241,7 @@ async fn main() -> Result<()> {
             slot,
             timestamp,
             remote,
+            headers,
             dry_run,
             verbose,
         } => {
@@ -243,6 +251,7 @@ async fn main() -> Result<()> {
                 slot,
                 timestamp,
                 remote,
+                headers,
                 dry_run,
                 verbose,
             };
@@ -532,6 +541,34 @@ fn parse_piv_slot(slot_str: &str) -> Result<PivSlot, SigningError> {
     PivSlot::new(slot_value)
 }
 
+/// Parse HTTP headers from command-line arguments.
+///
+/// Expected format: "Header-Name: value" or "Header-Name:value"
+///
+/// # Arguments
+/// * `headers` - Vector of header strings from CLI
+///
+/// # Returns
+/// Vector of (name, value) tuples
+///
+/// # Errors
+/// Returns error if a header is malformed (missing colon).
+fn parse_headers(headers: &[String]) -> Result<Vec<(String, String)>> {
+    headers
+        .iter()
+        .map(|h| {
+            let parts: Vec<&str> = h.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                return Err(miette::miette!(
+                    "Invalid header format: '{}'. Expected 'Header-Name: value'",
+                    h
+                ));
+            }
+            Ok((parts[0].trim().to_string(), parts[1].trim().to_string()))
+        })
+        .collect()
+}
+
 /// Handle remote signing via yubikey-proxy server.
 ///
 /// This function connects to a remote yubikey-proxy server to perform
@@ -558,11 +595,17 @@ async fn handle_remote_sign(
             "YUBIKEY_PROXY_TOKEN environment variable not set (required for remote signing)",
         )?;
 
+    // Parse extra headers (format: "Header-Name: value")
+    let extra_headers = parse_headers(&args.headers)?;
+
     if args.verbose {
         println!("🌐 Remote signing via {remote_url}");
         println!("  Input file: {}", args.input_file.display());
         println!("  Output file: {}", output_path.display());
         println!("  PIV slot: {piv_slot}");
+        if !extra_headers.is_empty() {
+            println!("  Custom headers: {}", extra_headers.len());
+        }
     }
 
     if args.dry_run {
@@ -571,7 +614,8 @@ async fn handle_remote_sign(
         println!("  PIV slot: {piv_slot}");
 
         // Check remote connection
-        let config = RemoteSignerConfig::new(remote_url, &auth_token);
+        let config =
+            RemoteSignerConfig::new(remote_url, &auth_token).with_extra_headers(extra_headers);
         let client = RemoteSigner::new(config).into_diagnostic()?;
         let status = client.check_status().await.into_diagnostic()?;
 
@@ -591,7 +635,7 @@ async fn handle_remote_sign(
         .context("Failed to read input file")?;
 
     // Create remote signer client
-    let config = RemoteSignerConfig::new(remote_url, &auth_token);
+    let config = RemoteSignerConfig::new(remote_url, &auth_token).with_extra_headers(extra_headers);
     let client = RemoteSigner::new(config).into_diagnostic()?;
 
     // Get certificate from remote YubiKey

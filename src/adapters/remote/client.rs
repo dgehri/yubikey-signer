@@ -21,6 +21,9 @@ pub struct RemoteSignerConfig {
     pub timeout_secs: u64,
     /// Whether to verify TLS certificates (should be true in production).
     pub verify_tls: bool,
+    /// Extra HTTP headers to include in all requests.
+    /// Useful for Cloudflare Access tokens or custom authentication.
+    pub extra_headers: Vec<(String, String)>,
 }
 
 impl RemoteSignerConfig {
@@ -36,6 +39,7 @@ impl RemoteSignerConfig {
             auth_token: auth_token.into(),
             timeout_secs: 30,
             verify_tls: true,
+            extra_headers: Vec::new(),
         }
     }
 
@@ -50,6 +54,29 @@ impl RemoteSignerConfig {
     #[must_use]
     pub fn with_insecure_tls(mut self) -> Self {
         self.verify_tls = false;
+        self
+    }
+
+    /// Add extra HTTP headers to all requests.
+    ///
+    /// Useful for Cloudflare Access tokens or custom authentication headers.
+    ///
+    /// # Arguments
+    /// * `headers` - Vector of (name, value) header pairs
+    #[must_use]
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.extra_headers = headers;
+        self
+    }
+
+    /// Add a single extra HTTP header.
+    ///
+    /// # Arguments
+    /// * `name` - Header name
+    /// * `value` - Header value
+    #[must_use]
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_headers.push((name.into(), value.into()));
         self
     }
 }
@@ -83,6 +110,28 @@ impl RemoteSigner {
         Ok(Self { config, client })
     }
 
+    /// Create a POST request builder with all configured headers applied.
+    ///
+    /// Includes Authorization header, Content-Type, and any extra headers
+    /// (e.g., Cloudflare Access tokens).
+    fn post_with_headers(&self, url: &str) -> reqwest::RequestBuilder {
+        let mut builder = self
+            .client
+            .post(url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.config.auth_token),
+            )
+            .header("Content-Type", "application/json");
+
+        // Apply extra headers (e.g., CF-Access-Client-Id, CF-Access-Client-Secret)
+        for (name, value) in &self.config.extra_headers {
+            builder = builder.header(name, value);
+        }
+
+        builder
+    }
+
     /// Check the status of the remote proxy and `YubiKey`.
     ///
     /// # Errors
@@ -94,13 +143,7 @@ impl RemoteSigner {
         };
 
         let response = self
-            .client
-            .post(&url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.auth_token),
-            )
-            .header("Content-Type", "application/json")
+            .post_with_headers(&url)
             .json(&request)
             .send()
             .await
@@ -121,13 +164,7 @@ impl RemoteSigner {
         let request = GetCertificateRequest::new(slot.as_u8());
 
         let response = self
-            .client
-            .post(&url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.auth_token),
-            )
-            .header("Content-Type", "application/json")
+            .post_with_headers(&url)
             .json(&request)
             .send()
             .await
@@ -153,13 +190,7 @@ impl RemoteSigner {
         let request = SignRequest::new(digest, slot.as_u8()).with_nonce();
 
         let response = self
-            .client
-            .post(&url)
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.auth_token),
-            )
-            .header("Content-Type", "application/json")
+            .post_with_headers(&url)
             .json(&request)
             .send()
             .await
