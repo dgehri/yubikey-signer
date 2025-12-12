@@ -61,16 +61,13 @@ jobs:
             binary-suffix: .exe
             asset-name: yubikey-signer-x86_64-pc-windows-msvc.exe
             proxy-asset-name: yubikey-proxy-x86_64-pc-windows-msvc.exe
+          # Note: Linux musl targets removed - pcsc-sys requires native libpcsclite
+          # which can't be cross-compiled. Use Docker build for aarch64 proxy instead.
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-gnu
             binary-suffix: ""
-            asset-name: yubikey-signer-x86_64-unknown-linux-musl
-            proxy-asset-name: yubikey-proxy-x86_64-unknown-linux-musl
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            binary-suffix: ""
-            asset-name: yubikey-signer-aarch64-unknown-linux-musl
-            proxy-asset-name: yubikey-proxy-aarch64-unknown-linux-musl
+            asset-name: yubikey-signer-x86_64-unknown-linux-gnu
+            proxy-asset-name: yubikey-proxy-x86_64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
             binary-suffix: ""
@@ -108,15 +105,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libpcsclite-dev musl-tools
-          # Install cross-compilation tools for aarch64 if needed
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-            # Download and install aarch64 musl cross-compiler
-            wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
-            tar xzf aarch64-linux-musl-cross.tgz
-            echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
-          fi
+          sudo apt-get install -y pkg-config libpcsclite-dev
           # Note: Not installing libssl-dev - we use vendored OpenSSL
 
       - name: Install system dependencies (macOS)
@@ -147,13 +136,6 @@ jobs:
             # Windows: Use static vcpkg OpenSSL to avoid DLL dependencies
             cargo build --release --target ${{ matrix.target }} --features static-openssl
             cargo build --release --target ${{ matrix.target }} --features "static-openssl,proxy-server"
-          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            # Cross-compile for aarch64 Linux
-            export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
-            export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
-            cargo build --release --target ${{ matrix.target }} --features vendored-openssl
-            cargo build --release --target ${{ matrix.target }} --features "vendored-openssl,proxy-server"
           else
             # Linux/macOS: Use vendored OpenSSL
             cargo build --release --target ${{ matrix.target }} --features vendored-openssl
@@ -180,10 +162,8 @@ jobs:
             cp "$proxy_path" "${{ matrix.proxy-asset-name }}"
           fi
 
-          # Verify the binaries work (skip for cross-compiled)
-          if [[ "${{ matrix.target }}" != "aarch64-unknown-linux-musl" ]]; then
-            ./${{ matrix.asset-name }} --version
-          fi
+          # Verify the binaries work
+          ./${{ matrix.asset-name }} --version
 
       - name: Upload Release Asset (deferred)
         uses: actions/upload-artifact@v4
