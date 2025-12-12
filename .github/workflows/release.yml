@@ -201,10 +201,75 @@ jobs:
             ${{ matrix.asset-name }}
             ${{ matrix.proxy-asset-name }}
 
+  # Sign Windows binaries using the remote YubiKey proxy
+  sign-windows:
+    name: Sign Windows Binaries
+    runs-on: windows-latest
+    needs: [build-release]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-x86_64-pc-windows-msvc
+          path: unsigned
+
+      - name: Sign Windows binaries using remote proxy
+        env:
+          YUBIKEY_PROXY_TOKEN: ${{ secrets.YUBIKEY_PROXY_TOKEN }}
+          YUBIKEY_SIGNER_URL: ${{ secrets.YUBIKEY_SIGNER_URL }}
+          YUBIKEY_CF_CLIENT_ID: ${{ secrets.YUBIKEY_CF_CLIENT_ID }}
+          YUBIKEY_CF_CLIENT_SECRET: ${{ secrets.YUBIKEY_CF_CLIENT_SECRET }}
+        run: |
+          # Create output directory
+          mkdir -p signed
+          
+          # Sign the signer binary
+          ./unsigned/yubikey-signer-x86_64-pc-windows-msvc.exe sign unsigned/yubikey-signer-x86_64-pc-windows-msvc.exe `
+            --output signed/yubikey-signer-x86_64-pc-windows-msvc.exe `
+            --remote "$env:YUBIKEY_SIGNER_URL" `
+            --header "$env:YUBIKEY_CF_CLIENT_ID" `
+            --header "$env:YUBIKEY_CF_CLIENT_SECRET" `
+            --verbose
+          
+          # Sign the proxy binary
+          ./unsigned/yubikey-signer-x86_64-pc-windows-msvc.exe sign unsigned/yubikey-proxy-x86_64-pc-windows-msvc.exe `
+            --output signed/yubikey-proxy-x86_64-pc-windows-msvc.exe `
+            --remote "$env:YUBIKEY_SIGNER_URL" `
+            --header "$env:YUBIKEY_CF_CLIENT_ID" `
+            --header "$env:YUBIKEY_CF_CLIENT_SECRET" `
+            --verbose
+
+      - name: Verify signatures
+        run: |
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe"
+          foreach ($binary in @("yubikey-signer-x86_64-pc-windows-msvc.exe", "yubikey-proxy-x86_64-pc-windows-msvc.exe")) {
+            Write-Host "Verifying signature on $binary..."
+            if (Test-Path $signtool) {
+              & $signtool verify /pa "signed/$binary"
+            } else {
+              $sig = Get-AuthenticodeSignature "signed/$binary"
+              Write-Host "Signature Status: $($sig.Status)"
+              Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+              if ($sig.Status -ne 'Valid') {
+                Write-Error "Signature verification failed for $binary : $($sig.StatusMessage)"
+                exit 1
+              }
+            }
+          }
+
+      - name: Upload signed Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-x86_64-pc-windows-msvc-signed
+          path: signed/*
+
   create-release:
     name: Create GitHub Release & Publish
     runs-on: ubuntu-latest
-    needs: [build-release, build-x86_64-musl, build-aarch64-proxy]
+    needs: [build-release, build-x86_64-musl, build-aarch64-proxy, sign-windows]
     permissions:
       contents: write
       discussions: write
@@ -236,6 +301,15 @@ jobs:
         with:
           path: dist
 
+      - name: Replace unsigned Windows binaries with signed ones
+        run: |
+          # Remove the unsigned Windows artifact folder
+          rm -rf dist/artifact-x86_64-pc-windows-msvc
+          # Rename signed folder to match expected pattern
+          mv dist/artifact-x86_64-pc-windows-msvc-signed dist/artifact-x86_64-pc-windows-msvc
+          echo "Using signed Windows binaries:"
+          ls -la dist/artifact-x86_64-pc-windows-msvc/
+
       - name: Rename aarch64 direct-usb proxy for clarity
         run: |
           if [ -f dist/artifact-aarch64-unknown-linux-musl-direct-usb/yubikey-proxy ]; then
@@ -254,6 +328,8 @@ jobs:
             
             ### Binaries
             Binaries for Windows, Linux, and macOS (Intel & Apple Silicon).
+            
+            **Windows binaries are code-signed** using an EV certificate.
             
             ### ASUS Router / Embedded aarch64
             Use `yubikey-proxy-aarch64-unknown-linux-musl-direct-usb` for ASUS routers
