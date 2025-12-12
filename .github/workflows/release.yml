@@ -40,12 +40,15 @@ jobs:
         run: |
           ls -la target-docker/x86_64-unknown-linux-musl/release/
           file target-docker/x86_64-unknown-linux-musl/release/yubikey-signer
+          file target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote
           file target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy
 
       - name: Prepare artifacts
         run: |
           cp target-docker/x86_64-unknown-linux-musl/release/yubikey-signer \
              yubikey-signer-x86_64-unknown-linux-musl
+          cp target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote \
+             yubikey-signer-remote-x86_64-unknown-linux-musl
           cp target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy \
              yubikey-proxy-x86_64-unknown-linux-musl
 
@@ -55,6 +58,7 @@ jobs:
           name: artifact-x86_64-unknown-linux-musl
           path: |
             yubikey-signer-x86_64-unknown-linux-musl
+            yubikey-signer-remote-x86_64-unknown-linux-musl
             yubikey-proxy-x86_64-unknown-linux-musl
 
   # Build aarch64 proxy separately using Docker for proper cross-compilation with direct-usb
@@ -330,6 +334,16 @@ jobs:
             Binaries for Windows, Linux, and macOS (Intel & Apple Silicon).
             
             **Windows binaries are code-signed** using an EV certificate.
+            
+            ### Linux x86_64 Binaries
+            
+            | Binary | Description |
+            |--------|-------------|
+            | `yubikey-signer-x86_64-unknown-linux-musl` | Full version with local YubiKey support (requires pcscd) |
+            | `yubikey-signer-remote-x86_64-unknown-linux-musl` | Fully static, remote-only (no pcscd needed) |
+            | `yubikey-proxy-x86_64-unknown-linux-musl` | Proxy server for remote signing |
+            
+            **For CI/CD pipelines:** Use `yubikey-signer-remote` - it's fully static with zero dependencies.
             
             ### ASUS Router / Embedded aarch64
             Use `yubikey-proxy-aarch64-unknown-linux-musl-direct-usb` for ASUS routers
