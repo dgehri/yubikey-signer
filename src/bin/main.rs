@@ -39,10 +39,13 @@ use clap::{Parser, Subcommand, ValueEnum};
 use miette::{Context, IntoDiagnostic, Result};
 use std::path::PathBuf;
 use yubikey_signer::{
+    adapters::remote::client::{RemoteSigner, RemoteSignerConfig},
     infra::config::{ConfigManager, ExportFormat},
     infra::error::SigningError,
     pipelines::sign::SignWorkflow,
+    services::authenticode::OpenSslAuthenticodeSigner,
     services::auto_detect::AutoDetection,
+    services::timestamp::TimestampClient,
     HashAlgorithm, PivPin, PivSlot, SigningConfig, TimestampUrl,
 };
 
@@ -82,8 +85,16 @@ SLOT REFERENCE:
 
     Valid formats: 0x9a, 9a, 154 (all refer to the same slot)
 
+REMOTE SIGNING:
+    For signing with a YubiKey on a remote machine (via yubikey-proxy):
+    
+    yubikey-signer sign myapp.exe --remote https://yubikey.example.com
+    
+    Set YUBIKEY_PROXY_TOKEN env var for authentication.
+
 ENVIRONMENT VARIABLES:
-    YUBICO_PIN      YubiKey PIN (required)
+    YUBICO_PIN          YubiKey PIN (required for local signing)
+    YUBIKEY_PROXY_TOKEN Authentication token for remote proxy
 ")]
 #[command(version)]
 struct Cli {
@@ -110,6 +121,10 @@ enum Commands {
         /// Timestamp server URL (use without value for default server)
         #[arg(short, long, value_name = "URL", num_args = 0..=1, default_missing_value = "http://ts.ssl.com")]
         timestamp: Option<String>,
+
+        /// Remote `YubiKey` proxy URL (e.g., <https://yubikey.example.com>)
+        #[arg(long, value_name = "URL", env = "YUBIKEY_PROXY_URL")]
+        remote: Option<String>,
 
         /// Dry run - validate configuration without signing
         #[arg(long)]
@@ -195,6 +210,7 @@ struct SignCommandArgs {
     output: Option<PathBuf>,
     slot: String,
     timestamp: Option<String>,
+    remote: Option<String>,
     dry_run: bool,
     verbose: bool,
 }
@@ -217,6 +233,7 @@ async fn main() -> Result<()> {
             output,
             slot,
             timestamp,
+            remote,
             dry_run,
             verbose,
         } => {
@@ -225,6 +242,7 @@ async fn main() -> Result<()> {
                 output,
                 slot,
                 timestamp,
+                remote,
                 dry_run,
                 verbose,
             };
@@ -244,18 +262,28 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
-    // Check if YUBICO_PIN is set
-    let pin = std::env::var("YUBICO_PIN")
-        .into_diagnostic()
-        .context("YUBICO_PIN environment variable not set")?;
-
     // Parse slot
     let piv_slot = parse_piv_slot(&args.slot)
         .into_diagnostic()
         .context("Invalid PIV slot")?;
 
     // Determine output path - default to in-place
-    let output_path = args.output.unwrap_or_else(|| args.input_file.clone());
+    let output_path = args
+        .output
+        .clone()
+        .unwrap_or_else(|| args.input_file.clone());
+
+    // Check if we're using remote signing (only if URL is non-empty)
+    if let Some(ref remote_url) = args.remote {
+        if !remote_url.is_empty() {
+            return handle_remote_sign(&args, piv_slot, output_path, remote_url).await;
+        }
+    }
+
+    // Local signing: Check if YUBICO_PIN is set
+    let pin = std::env::var("YUBICO_PIN")
+        .into_diagnostic()
+        .context("YUBICO_PIN environment variable not set (required for local signing)")?;
 
     // Signing configuration
     let signing_config = SigningConfig {
@@ -502,4 +530,139 @@ fn parse_piv_slot(slot_str: &str) -> Result<PivSlot, SigningError> {
     };
 
     PivSlot::new(slot_value)
+}
+
+/// Handle remote signing via yubikey-proxy server.
+///
+/// This function connects to a remote yubikey-proxy server to perform
+/// signing operations when the `YubiKey` is not locally attached.
+///
+/// # Arguments
+/// * `args` - Sign command arguments
+/// * `piv_slot` - Parsed PIV slot
+/// * `output_path` - Output file path
+/// * `remote_url` - Remote proxy URL
+///
+/// # Errors
+/// Returns error if remote signing fails.
+async fn handle_remote_sign(
+    args: &SignCommandArgs,
+    piv_slot: PivSlot,
+    output_path: PathBuf,
+    remote_url: &str,
+) -> Result<()> {
+    // Get proxy authentication token
+    let auth_token = std::env::var("YUBIKEY_PROXY_TOKEN")
+        .into_diagnostic()
+        .context(
+            "YUBIKEY_PROXY_TOKEN environment variable not set (required for remote signing)",
+        )?;
+
+    if args.verbose {
+        println!("🌐 Remote signing via {remote_url}");
+        println!("  Input file: {}", args.input_file.display());
+        println!("  Output file: {}", output_path.display());
+        println!("  PIV slot: {piv_slot}");
+    }
+
+    if args.dry_run {
+        println!("🔍 Dry run mode - validating remote configuration");
+        println!("  Remote URL: {remote_url}");
+        println!("  PIV slot: {piv_slot}");
+
+        // Check remote connection
+        let config = RemoteSignerConfig::new(remote_url, &auth_token);
+        let client = RemoteSigner::new(config).into_diagnostic()?;
+        let status = client.check_status().await.into_diagnostic()?;
+
+        println!("  YubiKey ready: {}", status.yubikey_ready);
+        if let Some(serial) = status.serial {
+            println!("  Serial: {serial}");
+        }
+        println!("✅ Remote configuration is valid");
+        return Ok(());
+    }
+
+    let start_time = std::time::Instant::now();
+
+    // Read input file
+    let pe_data = std::fs::read(&args.input_file)
+        .into_diagnostic()
+        .context("Failed to read input file")?;
+
+    // Create remote signer client
+    let config = RemoteSignerConfig::new(remote_url, &auth_token);
+    let client = RemoteSigner::new(config).into_diagnostic()?;
+
+    // Get certificate from remote YubiKey
+    if args.verbose {
+        println!("📜 Fetching certificate from remote YubiKey...");
+    }
+    let cert_der = client.get_certificate(piv_slot).await.into_diagnostic()?;
+
+    // Create OpenSSL signer with remote certificate
+    let openssl_signer = OpenSslAuthenticodeSigner::new(&cert_der, HashAlgorithm::Sha256)
+        .into_diagnostic()
+        .context("Failed to create signer with remote certificate")?;
+
+    // Compute TBS (to-be-signed) hash locally
+    // This is the hash of the authenticated attributes SET, NOT the PE hash!
+    // Authenticode signs the authenticated attributes, which contain the PE hash.
+    if args.verbose {
+        println!("🔢 Computing TBS hash (authenticated attributes)...");
+    }
+    let tbs_hash = openssl_signer
+        .compute_tbs_hash(&pe_data)
+        .into_diagnostic()?;
+
+    // Sign TBS hash remotely
+    if args.verbose {
+        println!("✍️  Signing TBS hash remotely...");
+    }
+    let signature = client
+        .sign_hash(&tbs_hash, piv_slot)
+        .await
+        .into_diagnostic()?;
+
+    // Build PKCS7 locally with remote signature
+    if args.verbose {
+        println!("📦 Building PKCS7 structure...");
+    }
+
+    // Get timestamp if requested
+    let timestamp_token = if let Some(ref ts_url) = args.timestamp {
+        if args.verbose {
+            println!("⏱️  Fetching timestamp from {ts_url}...");
+        }
+        let ts_url_typed = TimestampUrl::new(ts_url).into_diagnostic()?;
+        let ts_client = TimestampClient::new(&ts_url_typed);
+        Some(
+            ts_client
+                .get_timestamp(&signature)
+                .await
+                .into_diagnostic()?,
+        )
+    } else {
+        None
+    };
+
+    // Create signed PE with remote signature
+    let signed_pe = openssl_signer
+        .create_signed_pe_with_raw_signature(&pe_data, &signature, timestamp_token.as_deref())
+        .into_diagnostic()
+        .context("Failed to create signed PE")?;
+
+    // Write output
+    std::fs::write(&output_path, &signed_pe)
+        .into_diagnostic()
+        .context("Failed to write output file")?;
+
+    let duration = start_time.elapsed();
+    println!("✅ File signed successfully (remote)!");
+    if args.verbose {
+        println!("  Duration: {:.2}s", duration.as_secs_f64());
+        println!("  File size: {} bytes", signed_pe.len());
+    }
+
+    Ok(())
 }

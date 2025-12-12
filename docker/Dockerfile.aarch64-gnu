@@ -1,0 +1,83 @@
+# Dockerfile for cross-compiling yubikey-proxy to aarch64-unknown-linux-gnu (glibc)
+# This creates a dynamically linked binary compatible with glibc-based systems
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml run --rm build-aarch64-gnu
+#
+# The router has glibc 2.27, so we use an older toolchain for compatibility
+
+FROM messense/rust-musl-cross:aarch64-musl
+
+# Install aarch64 glibc cross-compiler
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    pkg-config \
+    libpcsclite-dev \
+    perl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add the aarch64-unknown-linux-gnu target
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# Copy PCSC headers to cross-compile sysroot
+RUN cp /usr/include/PCSC/* /usr/aarch64-linux-gnu/include/ 2>/dev/null || \
+    mkdir -p /usr/aarch64-linux-gnu/include && cp /usr/include/PCSC/* /usr/aarch64-linux-gnu/include/
+
+# Create stub library for pcsclite (actual library will be loaded at runtime)
+RUN echo '#include <stddef.h> \n\
+typedef struct { unsigned long dwProtocol; unsigned long cbPciLength; } SCARD_IO_REQUEST; \n\
+SCARD_IO_REQUEST g_rgSCardT0Pci = {1, 8}; \n\
+SCARD_IO_REQUEST g_rgSCardT1Pci = {2, 8}; \n\
+SCARD_IO_REQUEST g_rgSCardRawPci = {0, 8}; \n\
+long SCardEstablishContext(unsigned long a, void* b, void* c, void* d) { return 0; } \n\
+long SCardReleaseContext(unsigned long a) { return 0; } \n\
+long SCardConnect(unsigned long a, const char* b, unsigned long c, unsigned long d, void* e, void* f) { return 0; } \n\
+long SCardDisconnect(unsigned long a, unsigned long b) { return 0; } \n\
+long SCardTransmit(unsigned long a, void* b, void* c, unsigned long d, void* e, void* f, void* g) { return 0; } \n\
+long SCardBeginTransaction(unsigned long a) { return 0; } \n\
+long SCardEndTransaction(unsigned long a, unsigned long b) { return 0; } \n\
+long SCardStatus(unsigned long a, char* b, void* c, void* d, void* e, void* f, void* g) { return 0; } \n\
+long SCardGetStatusChange(unsigned long a, unsigned long b, void* c, unsigned long d) { return 0; } \n\
+long SCardControl(unsigned long a, unsigned long b, void* c, unsigned long d, void* e, unsigned long f, void* g) { return 0; } \n\
+long SCardListReaders(unsigned long a, const char* b, char* c, void* d) { return 0; } \n\
+long SCardFreeMemory(unsigned long a, void* b) { return 0; } \n\
+long SCardListReaderGroups(unsigned long a, char* b, void* c) { return 0; } \n\
+long SCardCancel(unsigned long a) { return 0; } \n\
+long SCardGetAttrib(unsigned long a, unsigned long b, void* c, void* d) { return 0; } \n\
+long SCardSetAttrib(unsigned long a, unsigned long b, void* c, unsigned long d) { return 0; } \n\
+long SCardReconnect(unsigned long a, unsigned long b, unsigned long c, unsigned long d, void* e) { return 0; } \n\
+long SCardIsValidContext(unsigned long a) { return 0; } \n\
+const char* pcsc_stringify_error(long a) { return "stub"; }' > /tmp/pcsclite_stub.c && \
+    aarch64-linux-gnu-gcc -shared -fPIC -o /usr/aarch64-linux-gnu/lib/libpcsclite.so.1 /tmp/pcsclite_stub.c && \
+    ln -sf libpcsclite.so.1 /usr/aarch64-linux-gnu/lib/libpcsclite.so && \
+    rm /tmp/pcsclite_stub.c
+
+# Create pkgconfig file
+RUN mkdir -p /usr/aarch64-linux-gnu/lib/pkgconfig && \
+    echo 'prefix=/usr/aarch64-linux-gnu\n\
+exec_prefix=${prefix}\n\
+libdir=${exec_prefix}/lib\n\
+includedir=${prefix}/include\n\
+\n\
+Name: libpcsclite\n\
+Description: PC/SC Lite library\n\
+Version: 1.8.0\n\
+Libs: -L${libdir} -lpcsclite\n\
+Cflags: -I${includedir}' > /usr/aarch64-linux-gnu/lib/pkgconfig/libpcsclite.pc
+
+WORKDIR /workspace
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"
+ENV CC_aarch64_unknown_linux_gnu="aarch64-linux-gnu-gcc"
+# Override pkg-config to use our cross-compile sysroot
+ENV PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu"
+ENV PKG_CONFIG_PATH_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu/lib/pkgconfig"
+ENV PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu/lib/pkgconfig"
+ENV PKG_CONFIG_ALLOW_CROSS_aarch64_unknown_linux_gnu="1"
+
+# Default command: build the proxy binary
+CMD ["cargo", "build", "--release", "--target", "aarch64-unknown-linux-gnu", \
+     "--target-dir", "/workspace/target-docker", \
+     "--features", "vendored-openssl,proxy-server", \
+     "-p", "yubikey-signer", "--bin", "yubikey-proxy"]

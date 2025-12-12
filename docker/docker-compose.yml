@@ -1,0 +1,86 @@
+# Docker Compose for cross-compiling yubikey-signer
+#
+# Usage:
+#   # Build the aarch64-musl binary (yubikey-proxy)
+#   docker compose -f docker/docker-compose.yml run --rm build-aarch64
+#
+#   # Or use the pre-built image directly
+#   docker compose -f docker/docker-compose.yml run --rm build-aarch64-quick
+#
+# Output:
+#   Binary will be at: target/aarch64-unknown-linux-musl/release/yubikey-proxy
+
+services:
+  # Build the custom cross-compilation image first, then compile
+  build-aarch64:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-musl
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+      # Use bind mount for target so binaries are available on host
+      - ../target:/workspace/target
+    working_dir: /workspace
+
+  # Quick build using pre-built image (requires running build-aarch64 first to create image)
+  build-aarch64-quick:
+    image: yubikey-signer-cross:latest
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
+  # Build all binaries for aarch64 musl
+  build-all-aarch64:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-musl
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+    command: >
+      sh -c "cargo build --release --target aarch64-unknown-linux-musl 
+             --features 'vendored-openssl,proxy-server' 
+             -p yubikey-signer"
+
+  # Build aarch64 glibc version (for routers without musl)
+  build-aarch64-gnu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-gnu
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
+  # Build aarch64 musl with custom pcsc-lite (for routers with Entware pcscd)
+  build-aarch64-static:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-static
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
+  # Build aarch64 musl with pcsc-lite 2.3.3 (matches Entware version exactly)
+  build-aarch64-static-v2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aarch64-static-v2
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
+volumes:
+  cargo-cache:
+  cargo-git:

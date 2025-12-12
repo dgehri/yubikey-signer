@@ -109,6 +109,40 @@ impl OpenSslAuthenticodeSigner {
         self.compute_pe_hash_view(&view)
     }
 
+    /// Compute the "to-be-signed" hash for remote signing.
+    ///
+    /// This is the hash of the authenticated attributes SET, which is what
+    /// actually gets signed in Authenticode. This is NOT the PE hash.
+    ///
+    /// The workflow for remote signing is:
+    /// 1. Call `compute_tbs_hash()` to get the hash that needs to be signed
+    /// 2. Send this hash to the remote `YubiKey` proxy for signing
+    /// 3. Use the returned signature with `create_signed_pe_with_raw_signature()`
+    ///
+    /// # Arguments
+    /// * `pe_data` - The original PE file bytes
+    ///
+    /// # Returns
+    /// The hash of the authenticated attributes SET (the "to-be-signed" data)
+    ///
+    /// # Errors
+    /// Returns error if PE parsing or hash computation fails.
+    pub fn compute_tbs_hash(&self, pe_data: &[u8]) -> SigningResult<Vec<u8>> {
+        let pe_hash = self.compute_pe_hash(pe_data)?;
+        let spc_content_domain = self.build_spc_indirect_data(&pe_hash)?;
+        let spc_content = spc_content_domain.as_der();
+        let authenticated_attrs =
+            self.create_authenticated_attributes(&pe_hash, spc_content, None, pe_data)?;
+        let (set_der, _a0_der) = self.build_tbs_and_embedding_data(&authenticated_attrs)?;
+        let tbs_hash = self.hash_data(&set_der)?;
+        log::debug!(
+            "Computed TBS hash: {} bytes (PE hash was {} bytes)",
+            tbs_hash.len(),
+            pe_hash.len()
+        );
+        Ok(tbs_hash)
+    }
+
     fn build_spc_indirect_data(&self, pe_hash: &[u8]) -> SigningResult<crate::SpcIndirectData> {
         let builder = crate::services::SpcBuilderService::new(self.hash_algorithm);
         builder.build(pe_hash, |h| self.create_spc_content(h))
@@ -237,6 +271,72 @@ impl OpenSslAuthenticodeSigner {
         let tbs_hash = self.hash_data(&set_der)?;
         let signature_bytes = signature_callback(&tbs_hash)?;
         Ok(signature_bytes)
+    }
+
+    /// Create a signed PE file using a pre-computed raw signature.
+    ///
+    /// This method is used for remote signing where the signature is computed
+    /// on a different machine (via yubikey-proxy) and sent back.
+    ///
+    /// # Arguments
+    /// * `original_pe` - The original PE file bytes
+    /// * `raw_signature` - The raw signature bytes from the remote signer
+    /// * `timestamp_token` - Optional timestamp token
+    ///
+    /// # Returns
+    /// The signed PE file bytes
+    ///
+    /// # Errors
+    /// Returns error if PKCS7 assembly or PE embedding fails.
+    pub fn create_signed_pe_with_raw_signature(
+        &self,
+        original_pe: &[u8],
+        raw_signature: &[u8],
+        timestamp_token: Option<&[u8]>,
+    ) -> SigningResult<Vec<u8>> {
+        let _pe_info = pe::parse_pe(original_pe)?;
+        let pe_hash = self.compute_pe_hash(original_pe)?;
+        let spc_content_domain = self.build_spc_indirect_data(&pe_hash)?;
+        let spc_content = spc_content_domain.as_der();
+
+        // Build authenticated attributes
+        let authenticated_attrs = self.create_authenticated_attributes(
+            &pe_hash,
+            spc_content,
+            timestamp_token,
+            original_pe,
+        )?;
+        let (_set_der, a0_der) = self.build_tbs_and_embedding_data(&authenticated_attrs)?;
+
+        // Build PKCS7 with the provided raw signature
+        let cert_der = self.certificate.to_der().map_err(|e| {
+            SigningError::CryptographicError(format!("Failed to get cert DER: {e}"))
+        })?;
+        let pkcs7_service = crate::services::Pkcs7BuilderService::new(
+            cert_der,
+            self.hash_algorithm,
+            true, // embed_certificate
+        );
+
+        let pkcs7_der = pkcs7_service
+            .build_signed_with_timestamp(spc_content, &a0_der, raw_signature, timestamp_token)?
+            .as_der()
+            .to_vec();
+        let pkcs7_trimmed = Self::trim_top_level_der(&pkcs7_der)?;
+
+        // Wrap for domain layer
+        let pkcs7_domain = crate::services::Pkcs7BuilderService::new(
+            self.certificate.to_der().unwrap_or_default(),
+            self.hash_algorithm,
+            true,
+        )
+        .wrap(pkcs7_trimmed.clone())?;
+
+        // Embed signature in PE
+        let unsigned = crate::domain::pe::UnsignedPeFile::new(original_pe.to_vec())?;
+        let embedder = PeSignatureEmbedderService::new();
+        let signed_pe_domain = embedder.embed(&unsigned, &pkcs7_domain, &pe_hash)?;
+        Ok(signed_pe_domain.into_bytes())
     }
 
     fn create_pkcs7_with_timestamp(
