@@ -25,7 +25,7 @@ jobs:
 
       - name: Build x86_64-musl Docker image
         run: |
-          docker build -t yubikey-x86_64-musl-builder \
+          DOCKER_BUILDKIT=0 docker build -t yubikey-x86_64-musl-builder \
             -f docker/Dockerfile.x86_64-musl \
             .
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Build aarch64-direct-usb Docker image
         run: |
-          docker build -t yubikey-aarch64-builder \
+          DOCKER_BUILDKIT=0 docker build -t yubikey-aarch64-builder \
             -f docker/Dockerfile.aarch64-direct-usb \
             .
 
