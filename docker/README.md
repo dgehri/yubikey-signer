@@ -13,11 +13,11 @@ The binary will be at: `target-docker/aarch64-unknown-linux-musl/release/yubikey
 
 ## Available Build Targets
 
-| Target | Command | Use Case |
-|--------|---------|----------|
-| `build-aarch64` | Basic musl with stub library | Generic deployment |
-| `build-aarch64-static-v2` | pcsc-lite 2.3.3 for Entware | ASUS routers with Entware |
-| `build-aarch64-gnu` | glibc build | Systems with glibc 2.34+ |
+| Target                    | Command                      | Use Case                  |
+| ------------------------- | ---------------------------- | ------------------------- |
+| `build-aarch64`           | Basic musl with stub library | Generic deployment        |
+| `build-aarch64-static-v2` | pcsc-lite 2.3.3 for Entware  | ASUS routers with Entware |
+| `build-aarch64-gnu`       | glibc build                  | Systems with glibc 2.34+  |
 
 ## Architecture
 
@@ -56,6 +56,7 @@ $binary = Get-Content "target-docker/aarch64-unknown-linux-musl/release/yubikey-
 ### Runtime Requirements
 
 The musl binary needs:
+
 - Alpine's musl dynamic linker (`ld-musl-aarch64.so.1`)
 - `libpcsclite.so.1` and `libpcsclite_real.so.1` (musl-compatible)
 - `libgcc_s.so.1` (from Alpine)
