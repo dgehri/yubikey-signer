@@ -14,6 +14,52 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Build x86_64-unknown-linux-musl using Docker for proper cross-compilation
+  # This produces a portable binary that works across Linux distros (no glibc version issues)
+  build-x86_64-musl:
+    name: Build x86_64 Linux (musl)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build x86_64-musl Docker image
+        run: |
+          docker build -t yubikey-x86_64-musl-builder \
+            -f docker/Dockerfile.x86_64-musl \
+            .
+
+      - name: Build yubikey-signer and yubikey-proxy for x86_64-musl
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v "yubikey-cargo-cache:/root/.cargo/registry" \
+            yubikey-x86_64-musl-builder
+
+      - name: Verify binaries
+        run: |
+          ls -la target-docker/x86_64-unknown-linux-musl/release/
+          file target-docker/x86_64-unknown-linux-musl/release/yubikey-signer
+          file target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy
+
+      - name: Prepare artifacts
+        run: |
+          cp target-docker/x86_64-unknown-linux-musl/release/yubikey-signer \
+             yubikey-signer-x86_64-unknown-linux-musl
+          cp target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy \
+             yubikey-proxy-x86_64-unknown-linux-musl
+
+      - name: Upload x86_64-musl artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-x86_64-unknown-linux-musl
+          path: |
+            yubikey-signer-x86_64-unknown-linux-musl
+            yubikey-proxy-x86_64-unknown-linux-musl
+
   # Build aarch64 proxy separately using Docker for proper cross-compilation with direct-usb
   build-aarch64-proxy:
     name: Build aarch64 Proxy (Direct USB)
@@ -61,13 +107,8 @@ jobs:
             binary-suffix: .exe
             asset-name: yubikey-signer-x86_64-pc-windows-msvc.exe
             proxy-asset-name: yubikey-proxy-x86_64-pc-windows-msvc.exe
-          # Note: Linux musl targets removed - pcsc-sys requires native libpcsclite
-          # which can't be cross-compiled. Use Docker build for aarch64 proxy instead.
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            binary-suffix: ""
-            asset-name: yubikey-signer-x86_64-unknown-linux-gnu
-            proxy-asset-name: yubikey-proxy-x86_64-unknown-linux-gnu
+          # Note: Linux x86_64-musl is built via Docker (build-x86_64-musl job)
+          # for portability across Linux distros (no glibc version issues)
           - os: macos-latest
             target: x86_64-apple-darwin
             binary-suffix: ""
@@ -101,13 +142,6 @@ jobs:
       - name: Run security checks
         run: cargo deny check
 
-      - name: Install system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libpcsclite-dev
-          # Note: Not installing libssl-dev - we use vendored OpenSSL
-
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
@@ -125,8 +159,8 @@ jobs:
         run: |
           vcpkg install openssl:x64-windows-static-md
 
-      - name: Set OpenSSL vendored feature (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+      - name: Set OpenSSL vendored feature (macOS)
+        if: matrix.os == 'macos-latest'
         run: |
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
@@ -137,7 +171,7 @@ jobs:
             cargo build --release --target ${{ matrix.target }} --features static-openssl
             cargo build --release --target ${{ matrix.target }} --features "static-openssl,proxy-server"
           else
-            # Linux/macOS: Use vendored OpenSSL
+            # macOS: Use vendored OpenSSL
             cargo build --release --target ${{ matrix.target }} --features vendored-openssl
             cargo build --release --target ${{ matrix.target }} --features "vendored-openssl,proxy-server"
           fi
@@ -176,7 +210,7 @@ jobs:
   create-release:
     name: Create GitHub Release & Publish
     runs-on: ubuntu-latest
-    needs: [build-release, build-aarch64-proxy]
+    needs: [build-release, build-x86_64-musl, build-aarch64-proxy]
     permissions:
       contents: write
       discussions: write

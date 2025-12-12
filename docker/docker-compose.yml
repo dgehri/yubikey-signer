@@ -4,13 +4,27 @@
 #   # Build the aarch64-musl binary (yubikey-proxy)
 #   docker compose -f docker/docker-compose.yml run --rm build-aarch64
 #
+#   # Build the x86_64-musl binary (portable Linux)
+#   docker compose -f docker/docker-compose.yml run --rm build-x86_64-musl
+#
 #   # Or use the pre-built image directly
 #   docker compose -f docker/docker-compose.yml run --rm build-aarch64-quick
 #
 # Output:
-#   Binary will be at: target/aarch64-unknown-linux-musl/release/yubikey-proxy
+#   Binary will be at: target-docker/<target>/release/yubikey-signer
 
 services:
+  # Build x86_64-unknown-linux-musl (portable across Linux distros)
+  build-x86_64-musl:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.x86_64-musl
+    volumes:
+      - ..:/workspace
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+    working_dir: /workspace
+
   # Build the custom cross-compilation image first, then compile
   build-aarch64:
     build:
