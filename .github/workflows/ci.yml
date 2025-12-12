@@ -229,3 +229,63 @@ jobs:
           name: artifact-aarch64-unknown-linux-musl-direct-usb
           path: target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy
           if-no-files-found: error
+
+  # Smoke test: sign a Windows binary using the remote YubiKey proxy
+  # This job only runs on push to main/develop (not on PRs) to protect secrets
+  signing-smoke-test:
+    name: Signing Smoke Test
+    runs-on: windows-latest
+    needs: [build]
+    # Only run on push to protected branches, never on PRs (secrets not available to forks)
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-x86_64-pc-windows-msvc
+          path: bin
+
+      - name: Sign the yubikey-signer binary using remote proxy
+        env:
+          YUBIKEY_PROXY_TOKEN: ${{ secrets.YUBIKEY_PROXY_TOKEN }}
+          YUBIKEY_SIGNER_URL: ${{ secrets.YUBIKEY_SIGNER_URL }}
+          YUBIKEY_CF_CLIENT_ID: ${{ secrets.YUBIKEY_CF_CLIENT_ID }}
+          YUBIKEY_CF_CLIENT_SECRET: ${{ secrets.YUBIKEY_CF_CLIENT_SECRET }}
+        run: |
+          # Create output directory
+          mkdir -p signed
+          
+          # Sign the signer binary itself (dogfooding!)
+          ./bin/yubikey-signer.exe sign bin/yubikey-signer.exe `
+            --output signed/yubikey-signer-signed.exe `
+            --remote "$env:YUBIKEY_SIGNER_URL" `
+            --header "$env:YUBIKEY_CF_CLIENT_ID" `
+            --header "$env:YUBIKEY_CF_CLIENT_SECRET" `
+            --verbose
+
+      - name: Verify signature
+        run: |
+          # Use Windows SDK signtool to verify the signature
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe"
+          if (Test-Path $signtool) {
+            & $signtool verify /pa signed/yubikey-signer-signed.exe
+          } else {
+            # Fallback to PowerShell verification
+            $sig = Get-AuthenticodeSignature signed/yubikey-signer-signed.exe
+            Write-Host "Signature Status: $($sig.Status)"
+            Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') {
+              Write-Error "Signature verification failed: $($sig.StatusMessage)"
+              exit 1
+            }
+          }
+
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows-binary
+          path: signed/yubikey-signer-signed.exe
+
