@@ -161,3 +161,40 @@ jobs:
           name: yubikey-signer-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/yubikey-signer${{ matrix.binary-suffix }}
           if-no-files-found: error
+
+  # Cross-compile yubikey-proxy for ASUS routers and similar aarch64 embedded devices
+  # Uses Docker-based build to match the Dockerfile.aarch64-direct-usb setup
+  build-aarch64-proxy:
+    name: Build aarch64 Proxy (Direct USB)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build aarch64-direct-usb Docker image
+        run: |
+          docker build -t yubikey-aarch64-builder \
+            -f docker/Dockerfile.aarch64-direct-usb \
+            .
+
+      - name: Build yubikey-proxy for aarch64
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v "yubikey-cargo-cache:/root/.cargo/registry" \
+            yubikey-aarch64-builder
+
+      - name: Verify binary
+        run: |
+          ls -la target-docker/aarch64-unknown-linux-musl/release/
+          file target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy
+
+      - name: Upload aarch64 proxy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yubikey-proxy-aarch64-unknown-linux-musl-direct-usb
+          path: target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy
+          if-no-files-found: error
