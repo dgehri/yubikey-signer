@@ -71,6 +71,7 @@ pub use crate::services::authenticode::OpenSslAuthenticodeSigner;
 pub use crate::services::signing::{Signer, SigningDetails, SigningOptions};
 pub use crate::services::timestamp::TimestampClient;
 
+#[cfg(feature = "pcsc-backend")]
 use std::path::Path;
 use std::str::FromStr;
 

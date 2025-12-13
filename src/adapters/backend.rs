@@ -24,13 +24,19 @@ pub enum BackendType {
 }
 
 impl std::fmt::Display for BackendType {
+    #[allow(unreachable_code)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            #[cfg(feature = "pcsc-backend")]
-            Self::Pcsc => write!(f, "PC/SC"),
-            #[cfg(feature = "direct-usb")]
-            Self::DirectUsb => write!(f, "Direct USB"),
+        #[cfg(feature = "pcsc-backend")]
+        if matches!(self, Self::Pcsc) {
+            return write!(f, "PC/SC");
         }
+        #[cfg(feature = "direct-usb")]
+        if matches!(self, Self::DirectUsb) {
+            return write!(f, "Direct USB");
+        }
+        // This is unreachable when any backend feature is enabled,
+        // but needed when building remote-only (no backend features)
+        write!(f, "Unknown")
     }
 }
 
@@ -150,19 +156,27 @@ pub fn connect_best_backend() -> SigningResult<Box<dyn YubiKeyBackend>> {
 /// # Errors
 ///
 /// Returns error if connection fails.
+#[allow(unreachable_code, unused_variables, clippy::needless_return)]
 pub fn connect_with_backend(backend_type: BackendType) -> SigningResult<Box<dyn YubiKeyBackend>> {
-    match backend_type {
-        #[cfg(feature = "pcsc-backend")]
-        BackendType::Pcsc => {
-            let ops = crate::adapters::yubikey::ops::YubiKeyOperations::connect()?;
-            Ok(Box::new(PcscBackend(ops)))
-        }
-        #[cfg(feature = "direct-usb")]
-        BackendType::DirectUsb => {
-            let ops = crate::adapters::ccid::DirectPivOperations::connect()?;
-            Ok(Box::new(DirectUsbBackend(ops)))
-        }
+    #[cfg(feature = "pcsc-backend")]
+    if matches!(backend_type, BackendType::Pcsc) {
+        let ops = crate::adapters::yubikey::ops::YubiKeyOperations::connect()?;
+        return Ok(Box::new(PcscBackend(ops)));
     }
+    #[cfg(feature = "direct-usb")]
+    if matches!(backend_type, BackendType::DirectUsb) {
+        let ops = crate::adapters::ccid::DirectPivOperations::connect()?;
+        return Ok(Box::new(DirectUsbBackend(ops)));
+    }
+    // Fallback error when no matching backend or no backend features enabled
+    #[cfg(not(any(feature = "pcsc-backend", feature = "direct-usb")))]
+    return Err(SigningError::YubiKeyError(
+        "No YubiKey backend available. Enable 'pcsc-backend' or 'direct-usb' feature.".to_string(),
+    ));
+
+    // When a backend feature is enabled but no match (should be unreachable)
+    #[cfg(any(feature = "pcsc-backend", feature = "direct-usb"))]
+    unreachable!("Invalid backend type for enabled features")
 }
 
 /// PC/SC backend wrapper.

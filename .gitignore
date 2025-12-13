@@ -1,6 +1,7 @@
 # Rust
 /target/
 /target-docker/
+/target-local/
 **/*.rs.bk
 *.pdb
 

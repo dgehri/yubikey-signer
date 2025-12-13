@@ -138,13 +138,17 @@ impl TimestampClient {
             match self.try_server_with_retries(server, hash).await {
                 Ok(response) => {
                     log::info!(
-                        "✅ Successfully obtained timestamp from {}",
+                        "[+] Successfully obtained timestamp from {}",
                         server.as_str()
                     );
                     return Ok(response);
                 }
                 Err(e) => {
-                    log::warn!("❌ Failed to get timestamp from {}: {}", server.as_str(), e);
+                    log::warn!(
+                        "[!] Failed to get timestamp from {}: {}",
+                        server.as_str(),
+                        e
+                    );
                     last_error = Some(e);
 
                     // Small delay before trying next server
@@ -341,18 +345,18 @@ impl TimestampClient {
         );
 
         // CRITICAL: Verify MessageImprint matches what we sent (GPT-5 Analysis Fix)
-        log::debug!("🔍 Verifying MessageImprint in timestamp token...");
+        log::debug!("[*] Verifying MessageImprint in timestamp token...");
         if let Err(e) = verify_timestamp_token(&timestamp_token, original_hash) {
-            log::error!("❌ MessageImprint verification failed: {e}");
+            log::error!("[!] MessageImprint verification failed: {e}");
             return Err(e);
         }
-        log::debug!("✅ MessageImprint verification passed - token is valid");
+        log::debug!("[+] MessageImprint verification passed - token is valid");
 
         // Check if certificates are included (look for certificate structure)
         let includes_certificates = self.detect_certificates_in_response(&timestamp_token);
 
         log::debug!(
-            "✅ Successfully parsed timestamp response with {} certificates",
+            "[+] Successfully parsed timestamp response with {} certificates",
             if includes_certificates {
                 "embedded"
             } else {
@@ -471,9 +475,9 @@ impl TimestampClient {
                         .windows(oid_pattern.len())
                         .any(|window| window == oid_pattern)
                     {
-                        log::debug!("✅ Extracted TimeStampToken: {} bytes", token.len());
+                        log::debug!("[+] Extracted TimeStampToken: {} bytes", token.len());
                         log::debug!(
-                            "✅ Verified TimeStampToken is PKCS7 ContentInfo with signedData"
+                            "[+] Verified TimeStampToken is PKCS7 ContentInfo with signedData"
                         );
                         return Ok(token);
                     }
@@ -512,9 +516,9 @@ impl TimestampClient {
                             .windows(oid_pattern.len())
                             .any(|window| window == oid_pattern)
                         {
-                            log::debug!("✅ Extracted TimeStampToken: {} bytes", token.len());
+                            log::debug!("[+] Extracted TimeStampToken: {} bytes", token.len());
                             log::debug!(
-                                "✅ Verified TimeStampToken is PKCS7 ContentInfo with signedData"
+                                "[+] Verified TimeStampToken is PKCS7 ContentInfo with signedData"
                             );
                             return Ok(token);
                         }
@@ -729,7 +733,7 @@ pub fn verify_timestamp_token(token: &[u8], original_hash: &[u8]) -> SigningResu
         ));
     }
 
-    log::debug!("✅ MessageImprint verification passed");
+    log::debug!("[+] MessageImprint verification passed");
     log::debug!("Token length: {} bytes", token.len());
     log::debug!("Original hash length: {} bytes", original_hash.len());
     log::debug!("MessageImprint: {}", hex::encode(original_hash));
@@ -815,7 +819,7 @@ mod tests {
             println!(
                 "  {}: {} {:?}",
                 server,
-                if reachable { "✅" } else { "❌" },
+                if reachable { "[+]" } else { "[!]" },
                 error
             );
         }

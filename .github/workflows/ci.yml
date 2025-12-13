@@ -84,6 +84,7 @@ jobs:
         run: |
           ls -la target-docker/x86_64-unknown-linux-musl/release/
           file target-docker/x86_64-unknown-linux-musl/release/yubikey-signer
+          file target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote
           file target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy
 
       - name: Upload x86_64-musl artifacts
@@ -92,6 +93,7 @@ jobs:
           name: artifact-x86_64-unknown-linux-musl
           path: |
             target-docker/x86_64-unknown-linux-musl/release/yubikey-signer
+            target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote
             target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy
           if-no-files-found: error
 

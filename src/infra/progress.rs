@@ -181,7 +181,7 @@ impl ProgressReporter for TerminalProgress {
         let elapsed = self.start_time.elapsed();
         let message = self.current_message.lock().unwrap().clone();
         println!(
-            "✅ {} - Completed in {:.1}s",
+            "[+] {} - Completed in {:.1}s",
             message,
             elapsed.as_secs_f64()
         );
@@ -194,7 +194,7 @@ impl ProgressReporter for TerminalProgress {
         let elapsed = self.start_time.elapsed();
         let message = self.current_message.lock().unwrap().clone();
         println!(
-            "❌ {} - Failed after {:.1}s: {}",
+            "[!] {} - Failed after {:.1}s: {}",
             message,
             elapsed.as_secs_f64(),
             error

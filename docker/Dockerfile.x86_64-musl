@@ -1,8 +1,8 @@
 # Dockerfile for building yubikey-signer on x86_64-unknown-linux-musl
-# This creates a statically linked binary that's portable across Linux distros
-#
-# The binary links against musl libc and uses vendored OpenSSL.
-# At runtime, it requires libpcsclite.so (pcscd) on the target system.
+# 
+# This creates TWO versions of the binary:
+# 1. yubikey-signer-remote: Fully static, remote-only signing (no pcscd needed)
+# 2. yubikey-signer: Static musl + dynamic pcsclite (for local YubiKey signing)
 #
 # Usage:
 #   docker compose -f docker/docker-compose.yml run --rm build-x86_64-musl
@@ -42,7 +42,7 @@ long SCardEstablishContext(unsigned long a, void* b, void* c, void* d) { return 
 long SCardReleaseContext(unsigned long a) { return 0; } \n\
 long SCardConnect(unsigned long a, const char* b, unsigned long c, unsigned long d, void* e, void* f) { return 0; } \n\
 long SCardDisconnect(unsigned long a, unsigned long b) { return 0; } \n\
-long SCardTransmit(unsigned long a, void* b, void* c, unsigned long d, void* e, void* f, void* g) { return 0; } \n\
+long SCardTransmit(unsigned long a, void* b, void* c, void* d, void* e, void* f, void* g) { return 0; } \n\
 long SCardBeginTransaction(unsigned long a) { return 0; } \n\
 long SCardEndTransaction(unsigned long a, unsigned long b) { return 0; } \n\
 long SCardStatus(unsigned long a, char* b, void* c, void* d, void* e, void* f, void* g) { return 0; } \n\
@@ -59,19 +59,47 @@ long SCardIsValidContext(unsigned long a) { return 0; } \n\
 const char* pcsc_stringify_error(long a) { return "stub"; }' > /tmp/pcsclite_stub.c && \
     x86_64-unknown-linux-musl-gcc -shared -fPIC -o /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so.1 /tmp/pcsclite_stub.c && \
     ln -sf libpcsclite.so.1 /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so && \
-    rm /tmp/pcsclite_stub.c
+    x86_64-unknown-linux-musl-gcc -c -fPIC -o /tmp/pcsclite_stub.o /tmp/pcsclite_stub.c && \
+    ar rcs /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.a /tmp/pcsclite_stub.o && \
+    rm /tmp/pcsclite_stub.c /tmp/pcsclite_stub.o
 
 WORKDIR /workspace
 
-# Build with dynamic linking for pcsclite (loaded at runtime)
-ENV RUSTFLAGS="-C target-feature=-crt-static"
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="x86_64-unknown-linux-musl-gcc"
 
-# Default command: build both yubikey-signer and yubikey-proxy
+# Build script that creates both versions:
+# 1. yubikey-signer-remote: Fully static, no pcsc-backend (remote signing only)
+# 2. yubikey-signer: Static musl but links pcsclite dynamically (local + remote)
+# 3. yubikey-proxy: For running the proxy server
 CMD ["sh", "-c", "\
+    set -e && \
+    \
+    echo '=== Building yubikey-signer-remote (fully static, remote-only) ===' && \
+    RUSTFLAGS='-C target-feature=+crt-static' \
+    cargo build --release --target x86_64-unknown-linux-musl \
+        --target-dir /workspace/target-docker \
+        --no-default-features \
+        --features 'vendored-openssl' && \
+    cp /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-signer \
+       /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote && \
+    \
+    echo '=== Building yubikey-signer (with pcsc-backend, requires pcsclite at runtime) ===' && \
+    RUSTFLAGS='-C target-feature=+crt-static' \
     cargo build --release --target x86_64-unknown-linux-musl \
         --target-dir /workspace/target-docker \
         --features 'vendored-openssl' && \
+    \
+    echo '=== Building yubikey-proxy ===' && \
+    RUSTFLAGS='-C target-feature=+crt-static' \
     cargo build --release --target x86_64-unknown-linux-musl \
         --target-dir /workspace/target-docker \
-        --features 'vendored-openssl,proxy-server'"]
+        --features 'vendored-openssl,proxy-server' && \
+    \
+    echo '=== Build complete ===' && \
+    echo 'Binaries:' && \
+    ls -la /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-* && \
+    echo '' && \
+    echo 'Checking linking:' && \
+    file /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-signer-remote && \
+    file /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-signer && \
+    file /workspace/target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy"]

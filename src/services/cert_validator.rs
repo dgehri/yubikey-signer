@@ -81,9 +81,9 @@ impl CertificateValidator {
             && (analysis.has_proper_key_usage || has_code_signing_eku);
 
         if analysis.is_code_signing_suitable {
-            log::info!("✅ Certificate is suitable for code signing");
+            log::info!("[+] Certificate is suitable for code signing");
         } else {
-            log::warn!("❌ Certificate is NOT suitable for code signing");
+            log::warn!("[!] Certificate is NOT suitable for code signing");
             for warning in &analysis.warnings {
                 log::warn!("  - {warning}");
             }

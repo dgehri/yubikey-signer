@@ -64,8 +64,6 @@ impl AuthenticodeBuilder {
         signature: &[u8],
         embed_certificate: bool,
     ) -> SigningResult<Vec<u8>> {
-        log::info!("✅ CONSOLIDATED_PKCS7::build_with_signature_fixed_attrs CALLED - THIS IS THE MAIN FLOW!");
-
         // Build SignedData inner content first
         let mut signed_data_content = Vec::new();
 
@@ -204,13 +202,13 @@ impl AuthenticodeBuilder {
     ) -> SigningResult<Vec<u8>> {
         // If no timestamp provided, reuse the non-timestamp path
         if let Some(ts_token) = timestamp_token {
-            log::warn!("🔧 Using rebuild approach that changes signedAttrs");
-            log::warn!("🔧 This will cause Windows validation issues - surgical approach needed");
+            log::warn!("[*] Using rebuild approach that changes signedAttrs");
+            log::warn!("[*] This will cause Windows validation issues - surgical approach needed");
 
             // Build complete PKCS#7 with timestamp - similar to build_with_signature_fixed_attrs
             // but using the timestamp-enabled SignerInfo builder
 
-            log::info!("✅ PKCS7::build_with_signature_and_timestamp_fixed_attrs CALLED");
+            log::info!("[+] PKCS7::build_with_signature_and_timestamp_fixed_attrs CALLED");
 
             // Build SignedData inner content first
             let mut signed_data_content = Vec::new();

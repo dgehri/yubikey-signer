@@ -79,12 +79,12 @@ async fn main() {
         match PivPin::new(&p) {
             Ok(pin) => pin,
             Err(e) => {
-                eprintln!("❌ Invalid PIN: {e}");
+                eprintln!("[!] Invalid PIN: {e}");
                 std::process::exit(1);
             }
         }
     } else {
-        eprintln!("❌ YUBICO_PIN environment variable not set");
+        eprintln!("[!] YUBICO_PIN environment variable not set");
         std::process::exit(1);
     };
 
@@ -97,11 +97,11 @@ async fn main() {
     }
 
     // Initialize proxy state
-    println!("🔐 Initializing YubiKey proxy server...");
+    println!("[*] Initializing YubiKey proxy server...");
     let state = match initialize_proxy(&config) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("❌ Failed to initialize: {e}");
+            eprintln!("[!] Failed to initialize: {e}");
             std::process::exit(1);
         }
     };
@@ -110,7 +110,7 @@ async fn main() {
     let addr: SocketAddr = match cli.bind.parse() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("❌ Invalid bind address: {e}");
+            eprintln!("[!] Invalid bind address: {e}");
             std::process::exit(1);
         }
     };
@@ -118,7 +118,7 @@ async fn main() {
     // Build routes
     let routes = build_routes(state.clone());
 
-    println!("🚀 YubiKey proxy server listening on {addr}");
+    println!("[*] YubiKey proxy server listening on {addr}");
     println!("   Endpoints:");
     println!("     POST /api/v1/status     - Check server and YubiKey status");
     println!("     POST /api/v1/certificate - Get certificate from slot");
@@ -135,7 +135,7 @@ async fn main() {
             .run(addr)
             .await;
     } else {
-        println!("⚠️  Running without TLS - use only behind a TLS-terminating proxy!");
+        println!("[!] Running without TLS - use only behind a TLS-terminating proxy!");
         warp::serve(routes).run(addr).await;
     }
 }
