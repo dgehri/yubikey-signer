@@ -42,11 +42,16 @@ use yubikey_signer::{
     adapters::remote::client::{RemoteSigner, RemoteSignerConfig},
     infra::config::{ConfigManager, ExportFormat},
     infra::error::SigningError,
-    pipelines::sign::SignWorkflow,
     services::authenticode::OpenSslAuthenticodeSigner,
-    services::auto_detect::AutoDetection,
     services::timestamp::TimestampClient,
-    HashAlgorithm, PivPin, PivSlot, SigningConfig, TimestampUrl,
+    HashAlgorithm, PivSlot, TimestampUrl,
+};
+
+// Local YubiKey support (requires pcsc-backend feature)
+#[cfg(feature = "pcsc-backend")]
+use yubikey_signer::{
+    pipelines::sign::SignWorkflow, services::auto_detect::AutoDetection, PivPin, SigningConfig,
+    YubiKeyOperations,
 };
 
 #[derive(Parser)]
@@ -141,7 +146,8 @@ enum Commands {
         verbose: bool,
     },
 
-    /// Discover available `YubiKey` certificates and slots
+    /// Discover available `YubiKey` certificates and slots (requires local `YubiKey`)
+    #[cfg(feature = "pcsc-backend")]
     Discover {
         /// Show detailed certificate information
         #[arg(short, long)]
@@ -227,10 +233,17 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging based on verbose flag
-    let log_level = match &cli.command {
-        Commands::Sign { verbose, .. } | Commands::Discover { verbose, .. } if *verbose => "debug",
+    #[allow(unused_mut)]
+    let mut log_level = match &cli.command {
+        Commands::Sign { verbose, .. } if *verbose => "debug",
         _ => "off", // No logging by default for clean output
     };
+    #[cfg(feature = "pcsc-backend")]
+    if let Commands::Discover { verbose, .. } = &cli.command {
+        if *verbose {
+            log_level = "debug";
+        }
+    }
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
@@ -258,6 +271,7 @@ async fn main() -> Result<()> {
             handle_sign_command(args).await?;
         }
 
+        #[cfg(feature = "pcsc-backend")]
         Commands::Discover { detailed, verbose } => {
             handle_discover_command(detailed, verbose).await?;
         }
@@ -289,78 +303,92 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
         }
     }
 
-    // Local signing: Check if YUBICO_PIN is set
-    let pin = std::env::var("YUBICO_PIN")
-        .into_diagnostic()
-        .context("YUBICO_PIN environment variable not set (required for local signing)")?;
-
-    // Signing configuration
-    let signing_config = SigningConfig {
-        pin: PivPin::new(pin).into_diagnostic()?,
-        piv_slot,
-        timestamp_url: args
-            .timestamp
-            .map(TimestampUrl::new)
-            .transpose()
-            .into_diagnostic()?,
-        hash_algorithm: HashAlgorithm::Sha256, // Auto-detected, this is just a default
-        embed_certificate: true,
-    };
-
-    if args.dry_run {
-        println!("[*] Dry run mode - validating configuration");
-        println!("  Input file: {}", args.input_file.display());
-        println!("  Output file: {}", output_path.display());
-        println!("  PIV slot: {}", signing_config.piv_slot);
-        if let Some(ref ts_url) = signing_config.timestamp_url {
-            println!("  Timestamp server: {}", ts_url.as_str());
-        } else {
-            println!("  Timestamp: disabled");
-        }
-        println!("[+] Configuration is valid");
-        return Ok(());
-    }
-
-    if args.verbose {
-        println!(
-            "[*] Signing {} with YubiKey slot {}",
-            args.input_file.display(),
-            signing_config.piv_slot
-        );
-    }
-
-    let start_time = std::time::Instant::now();
-
-    let workflow = SignWorkflow::new(signing_config.hash_algorithm);
-    let config_clone = signing_config.clone();
-    match workflow
-        .sign_pe_file(&args.input_file, &output_path, signing_config)
-        .await
+    // Local signing requires pcsc-backend feature
+    #[cfg(not(feature = "pcsc-backend"))]
     {
-        Ok(()) => {
-            let duration = start_time.elapsed();
-            println!("[+] File signed successfully!");
-            if args.verbose {
-                println!("  Duration: {:.2}s", duration.as_secs_f64());
-                let file_size = std::fs::metadata(&output_path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                println!("  File size: {file_size} bytes");
-                println!("  Slot used: {}", config_clone.piv_slot);
-                if let Some(ref ts_url) = config_clone.timestamp_url {
-                    println!("  Timestamp server: {}", ts_url.as_str());
+        return Err(miette::miette!(
+            "Local YubiKey signing requires the 'pcsc-backend' feature.\n\
+             This binary was built for remote signing only.\n\
+             Use --remote <URL> to sign via a remote YubiKey proxy."
+        ));
+    }
+
+    #[cfg(feature = "pcsc-backend")]
+    {
+        // Local signing: Check if YUBICO_PIN is set
+        let pin = std::env::var("YUBICO_PIN")
+            .into_diagnostic()
+            .context("YUBICO_PIN environment variable not set (required for local signing)")?;
+
+        // Signing configuration
+        let signing_config = SigningConfig {
+            pin: PivPin::new(pin).into_diagnostic()?,
+            piv_slot,
+            timestamp_url: args
+                .timestamp
+                .map(TimestampUrl::new)
+                .transpose()
+                .into_diagnostic()?,
+            hash_algorithm: HashAlgorithm::Sha256, // Auto-detected, this is just a default
+            embed_certificate: true,
+        };
+
+        if args.dry_run {
+            println!("[*] Dry run mode - validating configuration");
+            println!("  Input file: {}", args.input_file.display());
+            println!("  Output file: {}", output_path.display());
+            println!("  PIV slot: {}", signing_config.piv_slot);
+            if let Some(ref ts_url) = signing_config.timestamp_url {
+                println!("  Timestamp server: {}", ts_url.as_str());
+            } else {
+                println!("  Timestamp: disabled");
+            }
+            println!("[+] Configuration is valid");
+            return Ok(());
+        }
+
+        if args.verbose {
+            println!(
+                "[*] Signing {} with YubiKey slot {}",
+                args.input_file.display(),
+                signing_config.piv_slot
+            );
+        }
+
+        let start_time = std::time::Instant::now();
+
+        let workflow = SignWorkflow::new(signing_config.hash_algorithm);
+        let config_clone = signing_config.clone();
+        match workflow
+            .sign_pe_file(&args.input_file, &output_path, signing_config)
+            .await
+        {
+            Ok(()) => {
+                let duration = start_time.elapsed();
+                println!("[+] File signed successfully!");
+                if args.verbose {
+                    println!("  Duration: {:.2}s", duration.as_secs_f64());
+                    let file_size = std::fs::metadata(&output_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    println!("  File size: {file_size} bytes");
+                    println!("  Slot used: {}", config_clone.piv_slot);
+                    if let Some(ref ts_url) = config_clone.timestamp_url {
+                        println!("  Timestamp server: {}", ts_url.as_str());
+                    }
                 }
             }
+            Err(e) => {
+                eprintln!("[!] Signing failed: {e}");
+                std::process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("[!] Signing failed: {e}");
-            std::process::exit(1);
-        }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
+#[cfg(feature = "pcsc-backend")]
 async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
     if verbose {
         println!("[*] Discovering YubiKey certificates and capabilities...");
@@ -371,7 +399,7 @@ async fn handle_discover_command(detailed: bool, verbose: bool) -> Result<()> {
 
     if let Some(pin_str) = pin {
         // Connect to YubiKey
-        let mut yubikey_ops = yubikey_signer::YubiKeyOperations::connect()
+        let mut yubikey_ops = YubiKeyOperations::connect()
             .into_diagnostic()
             .context("Failed to connect to YubiKey")?;
 
