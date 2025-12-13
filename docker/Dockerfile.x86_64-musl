@@ -42,7 +42,7 @@ long SCardEstablishContext(unsigned long a, void* b, void* c, void* d) { return 
 long SCardReleaseContext(unsigned long a) { return 0; } \n\
 long SCardConnect(unsigned long a, const char* b, unsigned long c, unsigned long d, void* e, void* f) { return 0; } \n\
 long SCardDisconnect(unsigned long a, unsigned long b) { return 0; } \n\
-long SCardTransmit(unsigned long a, void* b, void* c, unsigned long d, void* e, void* f, void* g) { return 0; } \n\
+long SCardTransmit(unsigned long a, void* b, void* c, void* d, void* e, void* f, void* g) { return 0; } \n\
 long SCardBeginTransaction(unsigned long a) { return 0; } \n\
 long SCardEndTransaction(unsigned long a, unsigned long b) { return 0; } \n\
 long SCardStatus(unsigned long a, char* b, void* c, void* d, void* e, void* f, void* g) { return 0; } \n\
@@ -59,7 +59,9 @@ long SCardIsValidContext(unsigned long a) { return 0; } \n\
 const char* pcsc_stringify_error(long a) { return "stub"; }' > /tmp/pcsclite_stub.c && \
     x86_64-unknown-linux-musl-gcc -shared -fPIC -o /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so.1 /tmp/pcsclite_stub.c && \
     ln -sf libpcsclite.so.1 /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.so && \
-    rm /tmp/pcsclite_stub.c
+    x86_64-unknown-linux-musl-gcc -c -fPIC -o /tmp/pcsclite_stub.o /tmp/pcsclite_stub.c && \
+    ar rcs /usr/local/musl/x86_64-unknown-linux-musl/lib/libpcsclite.a /tmp/pcsclite_stub.o && \
+    rm /tmp/pcsclite_stub.c /tmp/pcsclite_stub.o
 
 WORKDIR /workspace
 
