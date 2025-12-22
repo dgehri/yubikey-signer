@@ -40,9 +40,11 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::path::PathBuf;
 use yubikey_signer::{
     adapters::remote::client::{RemoteSigner, RemoteSignerConfig},
+    domain::msi::is_msi_file,
     infra::config::{ConfigManager, ExportFormat},
     infra::error::SigningError,
     services::authenticode::OpenSslAuthenticodeSigner,
+    services::msi_signer::MsiSigner,
     services::timestamp::TimestampClient,
     HashAlgorithm, PivSlot, TimestampUrl,
 };
@@ -58,11 +60,14 @@ use yubikey_signer::{
 #[command(name = "yubikey-signer")]
 #[command(about = "Enhanced PE code signing with YubiKey PIV certificates")]
 #[command(long_about = "
-YubiKey PE Signer - Simple code signing utility
+YubiKey PE/MSI Signer - Simple code signing utility
 
 EXAMPLES:
     # Sign in-place (default behavior)
     yubikey-signer sign myapp.exe
+
+    # Sign MSI file
+    yubikey-signer sign installer.msi -o installer-signed.msi
 
     # Sign to different output file
     yubikey-signer sign myapp.exe -o myapp-signed.exe
@@ -81,6 +86,10 @@ EXAMPLES:
 
     # Dry run to validate configuration
     yubikey-signer sign myapp.exe --dry-run
+
+SUPPORTED FILE FORMATS:
+    PE files: .exe, .dll, .sys, .ocx, .scr
+    MSI files: .msi (Windows Installer packages)
 
 SLOT REFERENCE:
     9a = Authentication (default - most certificates stored here)
@@ -109,9 +118,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Sign a PE file
+    /// Sign a PE or MSI file
     Sign {
-        /// PE file to sign (.exe, .dll, .sys, etc.)
+        /// File to sign (.exe, .dll, .sys, .msi, etc.)
         #[arg(value_name = "INPUT_FILE")]
         input_file: PathBuf,
 
@@ -601,6 +610,7 @@ fn parse_headers(headers: &[String]) -> Result<Vec<(String, String)>> {
 ///
 /// This function connects to a remote yubikey-proxy server to perform
 /// signing operations when the `YubiKey` is not locally attached.
+/// Supports both PE files (.exe, .dll, .sys) and MSI files (.msi).
 ///
 /// # Arguments
 /// * `args` - Sign command arguments
@@ -626,9 +636,19 @@ async fn handle_remote_sign(
     // Parse extra headers (format: "Header-Name: value")
     let extra_headers = parse_headers(&args.headers)?;
 
+    // Read input file
+    let file_data = std::fs::read(&args.input_file)
+        .into_diagnostic()
+        .context("Failed to read input file")?;
+
+    // Detect file format
+    let is_msi = is_msi_file(&file_data);
+    let file_type_str = if is_msi { "MSI" } else { "PE" };
+
     if args.verbose {
         println!("[*] Remote signing via {remote_url}");
         println!("  Input file: {}", args.input_file.display());
+        println!("  File type: {file_type_str}");
         println!("  Output file: {}", output_path.display());
         println!("  PIV slot: {piv_slot}");
         if !extra_headers.is_empty() {
@@ -639,6 +659,7 @@ async fn handle_remote_sign(
     if args.dry_run {
         println!("[*] Dry run mode - validating remote configuration");
         println!("  Remote URL: {remote_url}");
+        println!("  File type: {file_type_str}");
         println!("  PIV slot: {piv_slot}");
 
         // Check remote connection
@@ -657,11 +678,6 @@ async fn handle_remote_sign(
 
     let start_time = std::time::Instant::now();
 
-    // Read input file
-    let pe_data = std::fs::read(&args.input_file)
-        .into_diagnostic()
-        .context("Failed to read input file")?;
-
     // Create remote signer client
     let config = RemoteSignerConfig::new(remote_url, &auth_token).with_extra_headers(extra_headers);
     let client = RemoteSigner::new(config).into_diagnostic()?;
@@ -672,19 +688,47 @@ async fn handle_remote_sign(
     }
     let cert_der = client.get_certificate(piv_slot).await.into_diagnostic()?;
 
+    // Route to appropriate signer based on file type
+    let signed_data = if is_msi {
+        handle_remote_msi_sign(args, &file_data, &client, &cert_der, piv_slot).await?
+    } else {
+        handle_remote_pe_sign(args, &file_data, &client, &cert_der, piv_slot).await?
+    };
+
+    // Write output
+    std::fs::write(&output_path, &signed_data)
+        .into_diagnostic()
+        .context("Failed to write output file")?;
+
+    let duration = start_time.elapsed();
+    println!("[+] {file_type_str} file signed successfully (remote)!");
+    if args.verbose {
+        println!("  Duration: {:.2}s", duration.as_secs_f64());
+        println!("  File size: {} bytes", signed_data.len());
+    }
+
+    Ok(())
+}
+
+/// Handle remote PE signing.
+async fn handle_remote_pe_sign(
+    args: &SignCommandArgs,
+    pe_data: &[u8],
+    client: &RemoteSigner,
+    cert_der: &[u8],
+    piv_slot: PivSlot,
+) -> Result<Vec<u8>> {
     // Create OpenSSL signer with remote certificate
-    let openssl_signer = OpenSslAuthenticodeSigner::new(&cert_der, HashAlgorithm::Sha256)
+    let openssl_signer = OpenSslAuthenticodeSigner::new(cert_der, HashAlgorithm::Sha256)
         .into_diagnostic()
         .context("Failed to create signer with remote certificate")?;
 
     // Compute TBS (to-be-signed) hash locally with context
-    // This computes the authenticated attributes and preserves them for later embedding.
-    // Using context ensures the signingTime is identical in hash computation and final PKCS7.
     if args.verbose {
         println!("[*] Computing TBS hash (authenticated attributes)...");
     }
     let tbs_context = openssl_signer
-        .compute_tbs_hash_with_context(&pe_data)
+        .compute_tbs_hash_with_context(pe_data)
         .into_diagnostic()?;
 
     // Sign TBS hash remotely
@@ -702,26 +746,12 @@ async fn handle_remote_sign(
     }
 
     // Get timestamp if requested
-    let timestamp_token = if let Some(ref ts_url) = args.timestamp {
-        if args.verbose {
-            println!("[*] Fetching timestamp from {ts_url}...");
-        }
-        let ts_url_typed = TimestampUrl::new(ts_url).into_diagnostic()?;
-        let ts_client = TimestampClient::new(&ts_url_typed);
-        Some(
-            ts_client
-                .get_timestamp(&signature)
-                .await
-                .into_diagnostic()?,
-        )
-    } else {
-        None
-    };
+    let timestamp_token = get_timestamp_if_requested(args, &signature).await?;
 
-    // Create signed PE using preserved context (ensures signingTime matches)
+    // Create signed PE using preserved context
     let signed_pe = openssl_signer
         .create_signed_pe_with_context(
-            &pe_data,
+            pe_data,
             &tbs_context,
             &signature,
             timestamp_token.as_deref(),
@@ -729,17 +759,76 @@ async fn handle_remote_sign(
         .into_diagnostic()
         .context("Failed to create signed PE")?;
 
-    // Write output
-    std::fs::write(&output_path, &signed_pe)
-        .into_diagnostic()
-        .context("Failed to write output file")?;
+    Ok(signed_pe)
+}
 
-    let duration = start_time.elapsed();
-    println!("[+] File signed successfully (remote)!");
+/// Handle remote MSI signing.
+async fn handle_remote_msi_sign(
+    args: &SignCommandArgs,
+    msi_data: &[u8],
+    client: &RemoteSigner,
+    cert_der: &[u8],
+    piv_slot: PivSlot,
+) -> Result<Vec<u8>> {
+    // Create MSI signer with remote certificate
+    let msi_signer = MsiSigner::new(cert_der, HashAlgorithm::Sha256)
+        .into_diagnostic()
+        .context("Failed to create MSI signer with remote certificate")?;
+
+    // Compute TBS (to-be-signed) hash locally with context
     if args.verbose {
-        println!("  Duration: {:.2}s", duration.as_secs_f64());
-        println!("  File size: {} bytes", signed_pe.len());
+        println!("[*] Computing MSI TBS hash (authenticated attributes)...");
+    }
+    let tbs_context = msi_signer
+        .compute_tbs_hash_with_context(msi_data)
+        .into_diagnostic()?;
+
+    // Sign TBS hash remotely
+    if args.verbose {
+        println!("[*] Signing TBS hash remotely...");
+    }
+    let signature = client
+        .sign_hash(tbs_context.tbs_hash(), piv_slot)
+        .await
+        .into_diagnostic()?;
+
+    // Build PKCS7 locally with remote signature
+    if args.verbose {
+        println!("[*] Building PKCS7 structure for MSI...");
     }
 
-    Ok(())
+    // Get timestamp if requested
+    let timestamp_token = get_timestamp_if_requested(args, &signature).await?;
+
+    // Create signed MSI using preserved context
+    let signed_msi = msi_signer
+        .create_signed_msi_with_context(
+            msi_data,
+            &tbs_context,
+            &signature,
+            timestamp_token.as_deref(),
+        )
+        .into_diagnostic()
+        .context("Failed to create signed MSI")?;
+
+    Ok(signed_msi.into_bytes())
+}
+
+/// Get timestamp token if requested in arguments.
+async fn get_timestamp_if_requested(
+    args: &SignCommandArgs,
+    signature: &[u8],
+) -> Result<Option<Vec<u8>>> {
+    if let Some(ref ts_url) = args.timestamp {
+        if args.verbose {
+            println!("[*] Fetching timestamp from {ts_url}...");
+        }
+        let ts_url_typed = TimestampUrl::new(ts_url).into_diagnostic()?;
+        let ts_client = TimestampClient::new(&ts_url_typed);
+        Ok(Some(
+            ts_client.get_timestamp(signature).await.into_diagnostic()?,
+        ))
+    } else {
+        Ok(None)
+    }
 }

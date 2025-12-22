@@ -7,6 +7,8 @@ pub mod authenticode;
 pub mod auto_detect;
 pub mod cert_validator;
 pub mod embedder;
+pub mod file_format;
+pub mod msi_signer;
 pub mod pe_hasher;
 pub mod pkcs7;
 pub mod pkcs7_builder;
@@ -30,6 +32,8 @@ pub use auto_detect::{
 };
 pub use cert_validator::{CertificateAnalysis, CertificateValidator};
 pub use embedder::PeSignatureEmbedderService;
+pub use file_format::{FileFormat, SignableFile};
+pub use msi_signer::{MsiSigner, MsiTbsContext};
 pub use pkcs7::AuthenticodeBuilder;
 pub use pkcs7_builder::Pkcs7BuilderService;
 pub use signed_attributes_builder::SignedAttributesBuilder;

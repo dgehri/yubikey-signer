@@ -49,6 +49,9 @@ openssl-sys = "0.9"
 # PE file manipulation
 goblin = "0.10.4"
 
+# MSI (OLE Compound File) manipulation
+cfb = "0.12"
+
 # HTTP client for timestamping
 reqwest = { version = "0.12.23", features = ["rustls-tls", "json"] }
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "fs"] }
