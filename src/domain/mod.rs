@@ -1,6 +1,7 @@
 pub mod attrs; // signed attributes domain scaffolding
 pub mod constants;
 pub mod crypto;
+pub mod msi;
 pub mod pe;
 pub mod pkcs7;
 pub mod spc;

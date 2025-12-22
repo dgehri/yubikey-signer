@@ -32,6 +32,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Load .env file for configuration
+function Load-EnvFile {
+    $envFile = Join-Path $PSScriptRoot "..\\.env"
+    if (Test-Path $envFile) {
+        Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^([^#][^=]+)=(.*)$') {
+                $name = $matches[1].Trim()
+                $value = $matches[2].Trim()
+                Set-Item -Path "env:$name" -Value $value
+            }
+        }
+    }
+}
+
+Load-EnvFile
+
 # Colors for output
 $Green = "`e[32m"
 $Red = "`e[31m"
@@ -133,11 +149,32 @@ function Test-YubikeySignerSign {
     
     try {
         $cmdArgs = @("sign", $InputFile, "--output", $OutputFile)
+        
+        # Use remote signing via proxy server (configured in .env)
+        if ($env:YUBIKEY_PROXY_URL) {
+            $cmdArgs += "--remote"
+            $cmdArgs += $env:YUBIKEY_PROXY_URL
+        } else {
+            # Default to the standard remote signing server
+            $cmdArgs += "--remote"
+            $cmdArgs += "https://sign.linkcad.com"
+        }
+        
         if ($WithTimestamp) {
             $cmdArgs += "--timestamp"
         }
         if ($Verbose) {
             $cmdArgs += "--verbose"
+        }
+        
+        # Add Cloudflare Access headers if available in environment
+        if ($env:YUBIKEY_CF_CLIENT_ID) {
+            $cmdArgs += "--header"
+            $cmdArgs += $env:YUBIKEY_CF_CLIENT_ID
+        }
+        if ($env:YUBIKEY_CF_CLIENT_SECRET) {
+            $cmdArgs += "--header"
+            $cmdArgs += $env:YUBIKEY_CF_CLIENT_SECRET
         }
         
         if ($Verbose) {
@@ -243,6 +280,8 @@ function Main {
         TimestampValid      = $false
         SignToolNoTimestamp = $false
         SignToolTimestamp   = $false
+        MsiSigned           = $false
+        MsiValid            = $false
     }
     
     # Ensure temp directory exists
@@ -254,6 +293,8 @@ function Main {
     $unsignedFile = "temp\test_unsigned.exe"
     $signedNoTs = "temp\test_signed_no_timestamp.exe"
     $signedWithTs = "temp\test_signed_with_timestamp.exe"
+    $unsignedMsi = "test-data\test_unsigned.msi"
+    $signedMsi = "temp\test_signed.msi"
     
     try {
         # Step 1: Build yubikey-signer
@@ -284,6 +325,23 @@ function Main {
                 $testResults.TimestampValid = Test-WindowsSignatureValidation $signedWithTs "timestamped"
                 $testResults.SignToolTimestamp = Test-SignToolValidation $signedWithTs "timestamped"
             }
+        }
+        
+        # Step 7: Sign MSI file (no timestamp)
+        if (Test-Path $unsignedMsi) {
+            # Remove previous signed MSI if exists
+            if (Test-Path $signedMsi) { Remove-Item $signedMsi -Force }
+            
+            $success = Test-YubikeySignerSign $unsignedMsi $signedMsi -SkipActualSigning:$SkipYubiKey
+            $testResults.MsiSigned = $success
+            
+            if (-not $SkipYubiKey -and $success -and (Test-Path $signedMsi)) {
+                # Step 8: Validate MSI signature
+                $testResults.MsiValid = Test-WindowsSignatureValidation $signedMsi "MSI"
+            }
+        }
+        else {
+            Write-TestStatus "Skipping MSI tests - test file not found: $unsignedMsi" "WARN"
         }
         
         # Summary

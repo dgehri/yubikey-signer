@@ -1,6 +1,6 @@
 [package]
 name = "yubikey-signer"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 description = "YubiKey code signing utility"
 authors = ["Daniel Gehriger <gehriger@linkcad.com>"]
@@ -49,6 +49,9 @@ openssl-sys = "0.9"
 # PE file manipulation
 goblin = "0.10.4"
 
+# MSI (OLE Compound File) manipulation
+cfb = "0.12"
+
 # HTTP client for timestamping
 reqwest = { version = "0.12.23", features = ["rustls-tls", "json"] }
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "fs"] }
@@ -92,6 +95,7 @@ serde_yaml = "0.9"
 
 # Logging
 log = "0.4"
+uuid = "1.19.0"
 
 [build-dependencies]
 ureq = { version = "2.0", default-features = false, features = ["tls"] }

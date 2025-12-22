@@ -24,6 +24,9 @@ pub enum SigningError {
     #[error("PE file parsing error: {0}")]
     PeParsingError(String),
 
+    #[error("MSI file parsing error: {0}")]
+    MsiParsingError(String),
+
     #[error("Signature creation error: {0}")]
     SignatureError(String),
 

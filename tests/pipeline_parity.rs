@@ -20,7 +20,15 @@ fn get_cert_der() -> Result<Vec<u8>, SigningError> {
         Ok(o) => o,
         Err(e) => return Err(SigningError::CertificateError(format!("No YubiKey: {e}"))),
     };
-    let pin = PivPin::new("4449f111").expect("pin construct");
+    let pin = match std::env::var("YUBICO_PIN") {
+        Ok(p) if !p.trim().is_empty() => p,
+        _ => {
+            return Err(SigningError::CertificateError(
+                "Missing YUBICO_PIN env var (required to authenticate to YubiKey)".into(),
+            ));
+        }
+    };
+    let pin = PivPin::new(&pin).expect("pin construct");
     ops.authenticate(&pin)?;
     ops.get_certificate_der(PivSlot::AUTHENTICATION)
 }
