@@ -477,93 +477,95 @@ impl<'a> MsiHashView<'a> {
         match algorithm {
             HashAlgorithm::Sha256 => {
                 let mut hasher = Sha256::new();
-                self.hash_directory(&parser, 0, true, &mut hasher)?;
+                hash_directory(&parser, 0, true, &mut hasher)?;
                 Ok(hasher.finalize().to_vec())
             }
             HashAlgorithm::Sha384 => {
                 let mut hasher = Sha384::new();
-                self.hash_directory(&parser, 0, true, &mut hasher)?;
+                hash_directory(&parser, 0, true, &mut hasher)?;
                 Ok(hasher.finalize().to_vec())
             }
             HashAlgorithm::Sha512 => {
                 let mut hasher = Sha512::new();
-                self.hash_directory(&parser, 0, true, &mut hasher)?;
+                hash_directory(&parser, 0, true, &mut hasher)?;
                 Ok(hasher.finalize().to_vec())
             }
         }
     }
+}
 
-    /// Hash a directory entry and its children recursively.
-    #[allow(clippy::only_used_in_recursion)]
-    fn hash_directory<D: Digest>(
-        &self,
-        parser: &CfbParser,
-        entry_index: usize,
-        is_root: bool,
-        hasher: &mut D,
-    ) -> SigningResult<()> {
-        if entry_index >= parser.directory_entries.len() {
-            return Ok(());
-        }
-
-        let entry = &parser.directory_entries[entry_index];
-
-        // Get and sort children
-        let mut children = parser.get_children(entry_index);
-        children.sort_by(|&a, &b| {
-            let entry_a = &parser.directory_entries[a];
-            let entry_b = &parser.directory_entries[b];
-            msi_stream_compare_utf16(entry_a.name_bytes(), entry_b.name_bytes())
-        });
-
-        log::trace!(
-            "Processing directory {} with {} children (is_root={})",
-            entry_index,
-            children.len(),
-            is_root
-        );
-
-        // Process children in sorted order
-        for child_index in children {
-            let child = &parser.directory_entries[child_index];
-
-            // Skip signature streams at root level only
-            if is_root && (child.is_digital_signature() || child.is_digital_signature_ex()) {
-                log::trace!("Skipping signature stream at root level");
-                continue;
-            }
-
-            match child.entry_type {
-                2 => {
-                    // Stream
-                    let size = child.size();
-                    // Skip empty or corrupted streams
-                    if size == 0 || size >= 0xFFFF_FFFA {
-                        continue;
-                    }
-                    let content = parser.read_stream(child)?;
-                    log::trace!(
-                        "Hashing stream: {} bytes (entry {})",
-                        content.len(),
-                        child_index
-                    );
-                    hasher.update(&content);
-                }
-                1 => {
-                    // Storage - recurse
-                    self.hash_directory(parser, child_index, false, hasher)?;
-                }
-                _ => {}
-            }
-        }
-
-        // Append this directory's CLSID (16 bytes)
-        log::trace!("Appending CLSID for entry {entry_index}");
-        hasher.update(entry.clsid);
-
-        Ok(())
+/// Hash a directory entry and its children recursively.
+///
+/// This is a free function to avoid clippy's `self_only_used_in_recursion` lint.
+fn hash_directory<D: Digest>(
+    parser: &CfbParser,
+    entry_index: usize,
+    is_root: bool,
+    hasher: &mut D,
+) -> SigningResult<()> {
+    if entry_index >= parser.directory_entries.len() {
+        return Ok(());
     }
 
+    let entry = &parser.directory_entries[entry_index];
+
+    // Get and sort children
+    let mut children = parser.get_children(entry_index);
+    children.sort_by(|&a, &b| {
+        let entry_a = &parser.directory_entries[a];
+        let entry_b = &parser.directory_entries[b];
+        msi_stream_compare_utf16(entry_a.name_bytes(), entry_b.name_bytes())
+    });
+
+    log::trace!(
+        "Processing directory {} with {} children (is_root={})",
+        entry_index,
+        children.len(),
+        is_root
+    );
+
+    // Process children in sorted order
+    for child_index in children {
+        let child = &parser.directory_entries[child_index];
+
+        // Skip signature streams at root level only
+        if is_root && (child.is_digital_signature() || child.is_digital_signature_ex()) {
+            log::trace!("Skipping signature stream at root level");
+            continue;
+        }
+
+        match child.entry_type {
+            2 => {
+                // Stream
+                let size = child.size();
+                // Skip empty or corrupted streams
+                if size == 0 || size >= 0xFFFF_FFFA {
+                    continue;
+                }
+                let content = parser.read_stream(child)?;
+                log::trace!(
+                    "Hashing stream: {} bytes (entry {})",
+                    content.len(),
+                    child_index
+                );
+                hasher.update(&content);
+            }
+            1 => {
+                // Storage - recurse
+                hash_directory(parser, child_index, false, hasher)?;
+            }
+            _ => {}
+        }
+    }
+
+    // Append this directory's CLSID (16 bytes)
+    log::trace!("Appending CLSID for entry {entry_index}");
+    hasher.update(entry.clsid);
+
+    Ok(())
+}
+
+impl MsiHashView<'_> {
     /// Compute the extended signature hash (metadata hash).
     ///
     /// This hashes file metadata (names, sizes, timestamps) for use with
