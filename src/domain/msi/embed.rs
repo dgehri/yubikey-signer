@@ -43,13 +43,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_parent_storages() {
-        // This test was for the old cfb-based writer and is no longer relevant.
-        // Keep a trivial assertion to retain the module test harness.
-        assert!(true);
-    }
-
-    #[test]
     fn test_embed_preserves_hash() {
         use crate::domain::crypto::HashAlgorithm;
         use crate::domain::msi::MsiHashView;
@@ -75,8 +68,8 @@ mod tests {
             .unwrap();
 
         // The hashes should match (signature stream is excluded from hash)
-        println!("Original hash: {:02x?}", original_hash);
-        println!("Signed hash:   {:02x?}", signed_hash);
+        println!("Original hash: {original_hash:02x?}");
+        println!("Signed hash:   {signed_hash:02x?}");
         assert_eq!(
             original_hash, signed_hash,
             "Embedding signature changed the MSI hash!"

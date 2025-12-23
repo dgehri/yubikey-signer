@@ -1,10 +1,10 @@
 //! Remote Signing Integration Tests
 //!
-//! Tests for PE and MSI file signing via the remote YubiKey proxy.
+//! Tests for PE and MSI file signing via the remote `YubiKey` proxy.
 //! These tests require environment variables to be set (either directly or via .env file):
 //!
 //! Required environment variables:
-//! - `YUBIKEY_PROXY_URL`: URL of the YubiKey proxy server
+//! - `YUBIKEY_PROXY_URL`: URL of the `YubiKey` proxy server
 //! - `YUBIKEY_PROXY_TOKEN`: Authentication token for the proxy
 //! - `YUBIKEY_CF_CLIENT_ID`: Cloudflare Access Client ID header (optional)
 //! - `YUBIKEY_CF_CLIENT_SECRET`: Cloudflare Access Client Secret header (optional)
