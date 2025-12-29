@@ -262,6 +262,8 @@ impl<'a> CfbParser<'a> {
         }
 
         // Read directory entries
+        // IMPORTANT: We must preserve entry indices even for empty entries,
+        // because child/sibling pointers reference entries by index.
         let mut directory_entries = Vec::new();
         let mut current_sector = first_dir_sector;
         while current_sector < 0xFFFF_FFFA {
@@ -275,9 +277,8 @@ impl<'a> CfbParser<'a> {
                     break;
                 }
                 if let Some(entry) = DirectoryEntry::from_bytes(&data[entry_offset..]) {
-                    if entry.entry_type != 0 {
-                        directory_entries.push(entry);
-                    }
+                    // Push all entries to preserve index ordering
+                    directory_entries.push(entry);
                 }
             }
             current_sector = if (current_sector as usize) < fat.len() {
@@ -377,8 +378,11 @@ impl<'a> CfbParser<'a> {
             let mut current_sector = entry.start_sector;
             while current_sector < 0xFFFF_FFFA && content.len() < size {
                 let offset = self.sector_size + current_sector as usize * self.sector_size;
-                if offset + self.sector_size <= self.data.len() {
-                    let bytes_to_read = (size - content.len()).min(self.sector_size);
+                // Handle partial sectors at end of file - read what's available.
+                if offset < self.data.len() {
+                    let available = self.data.len() - offset;
+                    // Cap at sector_size to ensure we follow the FAT chain correctly
+                    let bytes_to_read = (size - content.len()).min(available).min(self.sector_size);
                     content.extend_from_slice(&self.data[offset..offset + bytes_to_read]);
                 }
                 current_sector = if (current_sector as usize) < self.fat.len() {
@@ -544,9 +548,9 @@ fn hash_directory<D: Digest>(
                 }
                 let content = parser.read_stream(child)?;
                 log::trace!(
-                    "Hashing stream: {} bytes (entry {})",
-                    content.len(),
-                    child_index
+                    "Hashing stream: entry={}, size={} bytes",
+                    child_index,
+                    content.len()
                 );
                 hasher.update(&content);
             }
