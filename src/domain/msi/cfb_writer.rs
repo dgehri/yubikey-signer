@@ -796,17 +796,30 @@ fn read_sector(msi_data: &[u8], sector_size: usize, sector_id: u32) -> SigningRe
         )
         .ok_or_else(|| SigningError::MsiParsingError("Sector offset overflow".into()))?;
 
-    let end = offset
-        .checked_add(sector_size)
-        .ok_or_else(|| SigningError::MsiParsingError("Sector end overflow".into()))?;
-
-    if end > msi_data.len() {
-        return Err(SigningError::MsiParsingError(
-            "Sector read out of bounds".into(),
-        ));
+    // Check if sector starts within the file.
+    if offset >= msi_data.len() {
+        return Err(SigningError::MsiParsingError(format!(
+            "Sector read out of bounds: sector_id={sector_id}, offset={offset}, file_len={}",
+            msi_data.len()
+        )));
     }
 
-    Ok(msi_data[offset..end].to_vec())
+    // Handle partial sectors at the end of file.
+    // CFB files may not be padded to a full sector boundary, so the last sector
+    // can be truncated. We read what's available and zero-pad to sector_size.
+    let available = msi_data.len() - offset;
+    if available >= sector_size {
+        // Full sector available.
+        Ok(msi_data[offset..offset + sector_size].to_vec())
+    } else {
+        // Partial sector at end of file - read available bytes and zero-pad.
+        log::debug!(
+            "Reading partial sector {sector_id}: {available} bytes available, padding to {sector_size}"
+        );
+        let mut sector = vec![0u8; sector_size];
+        sector[..available].copy_from_slice(&msi_data[offset..]);
+        Ok(sector)
+    }
 }
 
 fn read_sector_chain(
