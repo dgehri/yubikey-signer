@@ -1498,9 +1498,9 @@ dependencies = [
 
 [[package]]
 name = "oid"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c19903c598813dba001b53beeae59bb77ad4892c5c1b9b3500ce4293a0d06c2"
+checksum = "33a7fe45463ee4732d4875f0e354d894895fad6fc8f5c7b3684addb2fe7b658c"
 
 [[package]]
 name = "once_cell"
