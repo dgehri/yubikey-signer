@@ -122,6 +122,7 @@ mod integration_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         // Would need a real PE file for testing
@@ -169,6 +170,7 @@ mod integration_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         println!("✅ Integration test configuration validated");

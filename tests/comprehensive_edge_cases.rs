@@ -473,6 +473,7 @@ mod network_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         // Test URLs that should be rejected during validation
@@ -525,6 +526,7 @@ mod network_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: Some(TimestampUrl::new("http://httpstat.us/200?sleep=30000").unwrap()), // 30 second delay
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         let temp_file = NamedTempFile::new().unwrap();
