@@ -106,7 +106,21 @@ impl DirectoryEntry {
         })
     }
 
-    /// Get the name bytes (UTF-16LE, excluding null terminator).
+    /// Get the name bytes for sorting (UTF-16LE, **including** null terminator).
+    ///
+    /// This matches osslsigncode's `dirent_cmp_hash` which uses `nameLen` that includes
+    /// the null terminator. This is critical for correct sort order because shorter
+    /// names with null terminators compare less than longer names with additional chars
+    /// at the same position (e.g., "ab\0" < "abc" because '\0' < 'c').
+    fn name_bytes_with_nul(&self) -> &[u8] {
+        if self.name_len > 0 {
+            &self.name[..self.name_len as usize]
+        } else {
+            &[]
+        }
+    }
+
+    /// Get the name bytes (UTF-16LE, excluding null terminator) for display/matching.
     fn name_bytes(&self) -> &[u8] {
         if self.name_len >= 2 {
             &self.name[..self.name_len as usize - 2]
@@ -514,11 +528,13 @@ fn hash_directory<D: Digest>(
     let entry = &parser.directory_entries[entry_index];
 
     // Get and sort children
+    // IMPORTANT: Use name_bytes_with_nul() for sorting to match osslsigncode's
+    // dirent_cmp_hash which compares including the null terminator bytes.
     let mut children = parser.get_children(entry_index);
     children.sort_by(|&a, &b| {
         let entry_a = &parser.directory_entries[a];
         let entry_b = &parser.directory_entries[b];
-        msi_stream_compare_utf16(entry_a.name_bytes(), entry_b.name_bytes())
+        msi_stream_compare_utf16(entry_a.name_bytes_with_nul(), entry_b.name_bytes_with_nul())
     });
 
     log::trace!(
@@ -790,13 +806,20 @@ fn msi_stream_compare(a: &str, b: &str) -> Ordering {
 
 /// Compare stream names using raw UTF-16LE byte comparison.
 ///
-/// This is the comparison used for the main MSI hash:
-/// 1. Compare bytes using `memcmp` up to the minimum length
+/// This matches osslsigncode's `dirent_cmp_hash` function, which is critical for
+/// correct MSI hash computation. The comparison rules are:
+///
+/// 1. Compare bytes using `memcmp` up to the minimum length (including null terminators)
 /// 2. If equal up to min length, the **longer name comes first** (wins)
+///
+/// **IMPORTANT**: The input slices must include the null terminator bytes to match
+/// osslsigncode's behavior. For example, comparing "ab\0\0" vs "abc\0\0" at position 4
+/// gives '\0' < 'c', so "ab" comes before "abc". This is the opposite of what happens
+/// when excluding null terminators where "abc" would come first as the longer name.
 fn msi_stream_compare_utf16(a: &[u8], b: &[u8]) -> Ordering {
     let min_len = a.len().min(b.len());
 
-    // Compare byte-by-byte up to min length
+    // Compare byte-by-byte up to min length (including null terminator bytes)
     for i in 0..min_len {
         match a[i].cmp(&b[i]) {
             Ordering::Equal => {}
@@ -805,7 +828,8 @@ fn msi_stream_compare_utf16(a: &[u8], b: &[u8]) -> Ordering {
     }
 
     // If names are equal up to min length, longer name wins (comes first)
-    // This is the opposite of typical length comparison
+    // This fallback case only happens when one name is a true prefix of the other
+    // and both have identical bytes up to the shorter length.
     match a.len().cmp(&b.len()) {
         Ordering::Less => Ordering::Greater, // a is shorter, so b wins (a > b)
         Ordering::Greater => Ordering::Less, // a is longer, so a wins (a < b)
@@ -826,20 +850,36 @@ mod tests {
 
     #[test]
     fn test_utf16_stream_comparison() {
-        // Equal prefix, longer name wins (comes first)
+        // Test with null terminators included (as used by osslsigncode)
+        // "ab\0\0" vs "abc\0\0" - at byte 4: \0 < 'c', so ab comes first
+        let name_ab_with_nul: &[u8] = &[0x61, 0x00, 0x62, 0x00, 0x00, 0x00]; // "ab\0" in UTF-16LE
+        let name_abc_with_nul: &[u8] = &[0x61, 0x00, 0x62, 0x00, 0x63, 0x00, 0x00, 0x00]; // "abc\0" in UTF-16LE
+
+        // "ab" comes BEFORE "abc" because null byte < 'c' (0x00 < 0x63)
         assert_eq!(
-            msi_stream_compare_utf16(b"abc", b"ab"),
-            Ordering::Less // abc comes before ab
+            msi_stream_compare_utf16(name_ab_with_nul, name_abc_with_nul),
+            Ordering::Less // ab\0 < abc\0 because at position 4: 0x00 < 0x63
         );
         assert_eq!(
-            msi_stream_compare_utf16(b"ab", b"abc"),
-            Ordering::Greater // ab comes after abc
+            msi_stream_compare_utf16(name_abc_with_nul, name_ab_with_nul),
+            Ordering::Greater // abc\0 > ab\0
         );
 
-        // Different bytes
+        // Different bytes (same length)
         assert_eq!(msi_stream_compare_utf16(b"a", b"b"), Ordering::Less);
 
         // Equal names
         assert_eq!(msi_stream_compare_utf16(b"test", b"test"), Ordering::Equal);
+
+        // True prefix case: when bytes are identical up to shorter length,
+        // longer name wins (comes first)
+        // This only applies when the shorter name's bytes are a true prefix
+        // (without null terminators changing the comparison)
+        let name_a: &[u8] = &[0x61, 0x00]; // "a" without null terminator
+        let name_ab: &[u8] = &[0x61, 0x00, 0x62, 0x00]; // "ab" without null terminator
+        assert_eq!(
+            msi_stream_compare_utf16(name_ab, name_a),
+            Ordering::Less // ab comes first (longer wins)
+        );
     }
 }
