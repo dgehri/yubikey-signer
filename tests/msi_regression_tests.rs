@@ -17,18 +17,17 @@ fn test_data_path() -> PathBuf {
 /// Regression test for Issue #65: MSI signature verification failure for larger files.
 ///
 /// The bug was that `msi_stream_compare_utf16` excluded null terminator bytes
-/// when comparing stream names, while osslsigncode includes them. This caused
-/// different sort orders:
+/// when comparing stream names. Per MS-CFB spec, `nameLen` includes the null
+/// terminator. This caused different sort orders:
 /// - Wrong: "abc" before "ab" (longer name wins after equal prefix)
 /// - Correct: "ab" before "abc" (null byte 0x00 < 'c' 0x63)
 ///
-/// This test verifies the sort order matches osslsigncode's `dirent_cmp_hash`.
+/// This test verifies the sort order matches the MS-CFB specification.
 ///
 /// See: <https://github.com/dgehri/yubikey-signer/issues/65>
 #[test]
 fn test_issue_65_stream_name_sorting_with_null_terminators() {
-    // Simulate osslsigncode's dirent_cmp_hash comparison behavior.
-    // The key insight is that nameLen INCLUDES the null terminator bytes.
+    // Per MS-CFB spec, nameLen INCLUDES the null terminator bytes.
 
     // "ab\0" in UTF-16LE (6 bytes including null terminator)
     let name_ab: &[u8] = &[0x61, 0x00, 0x62, 0x00, 0x00, 0x00];
@@ -61,12 +60,12 @@ fn test_issue_65_stream_name_sorting_with_null_terminators() {
 
 /// Regression test for Issue #65: Verify hash computation produces correct result.
 ///
-/// This test uses the standard test MSI to verify that the hash matches
-/// a known-good value computed by osslsigncode.
+/// This test uses the standard test MSI to verify that the hash is computed
+/// correctly per the MS-CFB Authenticode specification.
 ///
 /// See: <https://github.com/dgehri/yubikey-signer/issues/65>
 #[test]
-fn test_issue_65_msi_hash_matches_osslsigncode() {
+fn test_issue_65_msi_hash_computation() {
     let msi_path = test_data_path().join("test_unsigned.msi");
 
     if !msi_path.exists() {
@@ -174,7 +173,7 @@ fn test_issue_63_file_size_not_sector_aligned() {
 }
 
 /// Helper function that replicates the fixed comparison logic.
-/// This matches osslsigncode's `dirent_cmp_hash` behavior.
+/// This matches the MS-CFB specification for directory entry comparison.
 fn compare_utf16_with_nul(a: &[u8], b: &[u8]) -> Ordering {
     let min_len = a.len().min(b.len());
 
