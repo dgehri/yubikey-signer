@@ -153,8 +153,8 @@ fn test_issue_63_file_size_not_sector_aligned() {
     let data = fs::read(&msi_path).expect("Failed to read test MSI");
 
     // Check if file is sector-aligned (512 or 4096 bytes)
-    let is_512_aligned = data.len() % 512 == 0;
-    let is_4096_aligned = data.len() % 4096 == 0;
+    let is_512_aligned = data.len().is_multiple_of(512);
+    let is_4096_aligned = data.len().is_multiple_of(4096);
 
     println!(
         "Issue #63 regression test: File size = {} bytes, 512-aligned = {}, 4096-aligned = {}",
