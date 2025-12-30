@@ -108,10 +108,10 @@ impl DirectoryEntry {
 
     /// Get the name bytes for sorting (UTF-16LE, **including** null terminator).
     ///
-    /// This matches osslsigncode's `dirent_cmp_hash` which uses `nameLen` that includes
-    /// the null terminator. This is critical for correct sort order because shorter
-    /// names with null terminators compare less than longer names with additional chars
-    /// at the same position (e.g., "ab\0" < "abc" because '\0' < 'c').
+    /// Per the MS-CFB specification, `nameLen` includes the null terminator bytes.
+    /// This is critical for correct sort order because shorter names with null
+    /// terminators compare less than longer names with additional chars at the same
+    /// position (e.g., "ab\0" < "abc" because '\0' < 'c').
     fn name_bytes_with_nul(&self) -> &[u8] {
         if self.name_len > 0 {
             &self.name[..self.name_len as usize]
@@ -528,8 +528,8 @@ fn hash_directory<D: Digest>(
     let entry = &parser.directory_entries[entry_index];
 
     // Get and sort children
-    // IMPORTANT: Use name_bytes_with_nul() for sorting to match osslsigncode's
-    // dirent_cmp_hash which compares including the null terminator bytes.
+    // IMPORTANT: Use name_bytes_with_nul() for sorting per MS-CFB spec.
+    // The nameLen field includes the null terminator bytes.
     let mut children = parser.get_children(entry_index);
     children.sort_by(|&a, &b| {
         let entry_a = &parser.directory_entries[a];
@@ -806,16 +806,15 @@ fn msi_stream_compare(a: &str, b: &str) -> Ordering {
 
 /// Compare stream names using raw UTF-16LE byte comparison.
 ///
-/// This matches osslsigncode's `dirent_cmp_hash` function, which is critical for
-/// correct MSI hash computation. The comparison rules are:
+/// Per the MS-CFB specification for Authenticode MSI hashing, the comparison rules are:
 ///
 /// 1. Compare bytes using `memcmp` up to the minimum length (including null terminators)
 /// 2. If equal up to min length, the **longer name comes first** (wins)
 ///
-/// **IMPORTANT**: The input slices must include the null terminator bytes to match
-/// osslsigncode's behavior. For example, comparing "ab\0\0" vs "abc\0\0" at position 4
-/// gives '\0' < 'c', so "ab" comes before "abc". This is the opposite of what happens
-/// when excluding null terminators where "abc" would come first as the longer name.
+/// **IMPORTANT**: The input slices must include the null terminator bytes per the spec.
+/// For example, comparing "ab\0\0" vs "abc\0\0" at position 4 gives '\0' < 'c',
+/// so "ab" comes before "abc". This is the opposite of what happens when excluding
+/// null terminators where "abc" would come first as the longer name.
 fn msi_stream_compare_utf16(a: &[u8], b: &[u8]) -> Ordering {
     let min_len = a.len().min(b.len());
 
@@ -850,7 +849,7 @@ mod tests {
 
     #[test]
     fn test_utf16_stream_comparison() {
-        // Test with null terminators included (as used by osslsigncode)
+        // Test with null terminators included (per MS-CFB spec)
         // "ab\0\0" vs "abc\0\0" - at byte 4: \0 < 'c', so ab comes first
         let name_ab_with_nul: &[u8] = &[0x61, 0x00, 0x62, 0x00, 0x00, 0x00]; // "ab\0" in UTF-16LE
         let name_abc_with_nul: &[u8] = &[0x61, 0x00, 0x62, 0x00, 0x63, 0x00, 0x00, 0x00]; // "abc\0" in UTF-16LE
