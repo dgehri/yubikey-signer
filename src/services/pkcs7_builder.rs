@@ -16,6 +16,7 @@ use crate::{
 
 pub struct Pkcs7BuilderService {
     cert_der: Vec<u8>,
+    additional_certs: Vec<Vec<u8>>,
     hash_algorithm: HashAlgorithm,
     embed_certificate: bool,
 }
@@ -26,9 +27,25 @@ impl Pkcs7BuilderService {
     pub fn new(cert_der: Vec<u8>, hash_algorithm: HashAlgorithm, embed_certificate: bool) -> Self {
         Self {
             cert_der,
+            additional_certs: Vec::new(),
             hash_algorithm,
             embed_certificate,
         }
+    }
+
+    /// Set additional certificates to include in the signature.
+    ///
+    /// These certificates (typically intermediate CAs) will be embedded in the
+    /// PKCS#7 `SignedData` certificates field alongside the signing certificate.
+    /// This enables Windows to build the full certificate chain without needing
+    /// to fetch intermediates from the network or local stores.
+    ///
+    /// # Arguments
+    /// * `certs` - Vector of DER-encoded certificate bytes
+    #[must_use]
+    pub fn with_additional_certs(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.additional_certs = certs;
+        self
     }
 
     /// Build full PKCS#7 without timestamp using pre-encoded signed attributes + signature.
@@ -199,13 +216,29 @@ impl Pkcs7BuilderService {
         Ok(Pkcs7SignerInfos::from_der(signer_infos))
     }
 
-    /// Build certificates [0] IMPLICIT block (end-entity only for now).
-    /// chain embedding to be added in later phase.
+    /// Build certificates [0] IMPLICIT block (end-entity + additional certs).
+    ///
+    /// Includes the signing certificate and any additional certificates
+    /// (e.g., intermediate CAs) configured via `with_additional_certs()`.
     pub fn build_certificates_component(&self) -> SigningResult<Vec<u8>> {
+        // Calculate total length of all certificates
+        let mut total_len = self.cert_der.len();
+        for cert in &self.additional_certs {
+            total_len += cert.len();
+        }
+
         let mut field = Vec::new();
         field.push(0xA0); // [0] IMPLICIT constructed
-        field.extend_from_slice(&self.encode_len(self.cert_der.len()));
+        field.extend_from_slice(&self.encode_len(total_len));
+
+        // Add end-entity certificate first
         field.extend_from_slice(&self.cert_der);
+
+        // Add additional certificates (intermediates, etc.)
+        for cert in &self.additional_certs {
+            field.extend_from_slice(cert);
+        }
+
         Ok(field)
     }
 
@@ -229,7 +262,8 @@ impl Pkcs7BuilderService {
     ) -> SigningResult<Pkcs7SignedData> {
         // timestamp path still delegates to authenticode builder.
         if timestamp_token.is_some() {
-            let builder = AuthenticodeBuilder::new(self.cert_der.clone(), self.hash_algorithm);
+            let builder = AuthenticodeBuilder::new(self.cert_der.clone(), self.hash_algorithm)
+                .with_additional_certs(self.additional_certs.clone());
             let der = builder.build_with_signature_and_timestamp_fixed_attrs(
                 spc_content,
                 a0_implicit_attrs,

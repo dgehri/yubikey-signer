@@ -17,6 +17,7 @@ use openssl::x509::X509;
 /// Consolidated PKCS#7 builder for Authenticode signatures
 pub struct AuthenticodeBuilder {
     certificate_der: Vec<u8>,
+    additional_certs: Vec<Vec<u8>>,
     hash_algorithm: HashAlgorithm,
 }
 
@@ -26,8 +27,22 @@ impl AuthenticodeBuilder {
     pub fn new(certificate_der: Vec<u8>, hash_algorithm: HashAlgorithm) -> Self {
         Self {
             certificate_der,
+            additional_certs: Vec::new(),
             hash_algorithm,
         }
+    }
+
+    /// Set additional certificates to include in the signature.
+    ///
+    /// These certificates (typically intermediate CAs) will be embedded in the
+    /// PKCS#7 `SignedData` certificates field alongside the signing certificate.
+    ///
+    /// # Arguments
+    /// * `certs` - Vector of DER-encoded certificate bytes
+    #[must_use]
+    pub fn with_additional_certs(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.additional_certs = certs;
+        self
     }
 
     /// Encode ASN.1 length field correctly (short form vs long form)
@@ -346,19 +361,33 @@ impl AuthenticodeBuilder {
     }
 
     /// Build certificates [0] IMPLICIT
+    ///
+    /// Includes the signing certificate and any additional certificates
+    /// (e.g., intermediate CAs) configured via `with_additional_certs()`.
     fn build_certificates(&self) -> SigningResult<Vec<u8>> {
         let mut field = Vec::new();
 
+        // Calculate total length of all certificates
+        let mut total_len = self.certificate_der.len();
+        for cert in &self.additional_certs {
+            total_len += cert.len();
+        }
+
         // certificates [0] IMPLICIT ExtendedCertificatesAndCertificates
         // IMPLICIT tagging means we DO NOT include the SET tag (0x31); content is the concatenation
-        // of Certificate DER encodings. Include only the end-entity certificate.
+        // of Certificate DER encodings.
         field.push(0xA0); // [0] IMPLICIT, constructed
 
-        // Encode length of the single certificate
-        field.extend_from_slice(&self.encode_length_bytes(self.certificate_der.len()));
+        // Encode length of all certificates
+        field.extend_from_slice(&self.encode_length_bytes(total_len));
 
-        // Append end-entity cert
+        // Append end-entity cert first
         field.extend_from_slice(&self.certificate_der);
+
+        // Append additional certificates (intermediates, etc.)
+        for cert in &self.additional_certs {
+            field.extend_from_slice(cert);
+        }
 
         Ok(field)
     }

@@ -47,6 +47,7 @@ impl TbsContext {
 /// OpenSSL-based Authenticode signer implementation
 pub struct OpenSslAuthenticodeSigner {
     certificate: X509,
+    additional_certs: Vec<Vec<u8>>,
     hash_algorithm: HashAlgorithm,
 }
 
@@ -65,8 +66,30 @@ impl OpenSslAuthenticodeSigner {
         );
         Ok(Self {
             certificate,
+            additional_certs: Vec::new(),
             hash_algorithm,
         })
+    }
+
+    /// Set additional certificates to include in the signature.
+    ///
+    /// These certificates (typically intermediate CAs) will be embedded in the
+    /// PKCS#7 `SignedData` certificates field alongside the signing certificate.
+    /// This enables Windows to build the full certificate chain without needing
+    /// to fetch intermediates from the network or local stores.
+    ///
+    /// # Arguments
+    /// * `certs` - Vector of DER-encoded certificate bytes
+    #[must_use]
+    pub fn with_additional_certs(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.additional_certs = certs;
+        self
+    }
+
+    /// Get the additional certificates configured for this signer.
+    #[must_use]
+    pub fn additional_certs(&self) -> &[Vec<u8>] {
+        &self.additional_certs
     }
 
     /// Get the hash algorithm selected for this signer
@@ -276,6 +299,7 @@ impl OpenSslAuthenticodeSigner {
         let certificate = builder.build();
         Ok(Self {
             certificate,
+            additional_certs: Vec::new(),
             hash_algorithm: algo,
         })
     }
@@ -430,7 +454,8 @@ impl OpenSslAuthenticodeSigner {
             cert_der,
             self.hash_algorithm,
             true, // embed_certificate
-        );
+        )
+        .with_additional_certs(self.additional_certs.clone());
 
         let pkcs7_der = pkcs7_service
             .build_signed_with_timestamp(spc_content, a0_der, raw_signature, timestamp_token)?
@@ -469,7 +494,8 @@ impl OpenSslAuthenticodeSigner {
             cert_der,
             self.hash_algorithm,
             embed_certificate,
-        );
+        )
+        .with_additional_certs(self.additional_certs.clone());
         let authenticated_attrs = self.create_authenticated_attributes(
             pe_hash,
             spc_content,
@@ -509,7 +535,8 @@ impl OpenSslAuthenticodeSigner {
             cert_der,
             self.hash_algorithm,
             embed_certificate,
-        );
+        )
+        .with_additional_certs(self.additional_certs.clone());
         let pkcs7 = pkcs7_service
             .build_signed_with_timestamp(
                 spc_content,
