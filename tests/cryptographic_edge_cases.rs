@@ -201,6 +201,7 @@ mod algorithm_tests {
                     hash_algorithm: hash_alg,
                     timestamp_url: None,
                     embed_certificate: true,
+                    additional_certs: Vec::new(),
                 };
 
                 // Create minimal test file
@@ -337,6 +338,7 @@ mod error_handling_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -411,6 +413,7 @@ mod error_handling_tests {
                     }),
             ), // Very long URL - will be rejected
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -443,6 +446,7 @@ mod real_world_tests {
                 TimestampUrl::new("http://timestamp.digicert.com").expect("Valid URL"),
             ),
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         // Create a more realistic PE file (larger)

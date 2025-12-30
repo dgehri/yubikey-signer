@@ -88,6 +88,8 @@ pub struct SigningConfig {
     pub hash_algorithm: HashAlgorithm,
     /// Whether to embed the signing certificate
     pub embed_certificate: bool,
+    /// Additional certificates to embed (e.g., intermediate CAs)
+    pub additional_certs: Vec<Vec<u8>>,
 }
 
 /// Supported hash algorithms
@@ -303,6 +305,7 @@ mod tests {
             timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
             hash_algorithm: HashAlgorithm::Sha256,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         assert_eq!(config.pin.as_str(), "123456");

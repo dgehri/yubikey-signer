@@ -25,6 +25,7 @@ async fn test_real_yubikey_connection_and_certificate_retrieval() {
         hash_algorithm: HashAlgorithm::Sha256, // Matches -h sha256
         timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()), // Matches -ts
         embed_certificate: true,
+        additional_certs: Vec::new(),
     };
 
     // Create a minimal PE file for testing (will fail gracefully if not a real PE)

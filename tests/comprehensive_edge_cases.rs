@@ -113,6 +113,7 @@ mod input_validation_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         }
     }
 

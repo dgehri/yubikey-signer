@@ -12,6 +12,7 @@ fn test_signing_config_creation() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: Some(TimestampUrl::new("http://ts.ssl.com").unwrap()),
         embed_certificate: true,
+        additional_certs: Vec::new(),
     };
 
     assert_eq!(config.piv_slot.as_u8(), 0x9c);
@@ -36,6 +37,7 @@ async fn test_sign_pe_file_with_invalid_input() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
+        additional_certs: Vec::new(),
     };
 
     let input_path = PathBuf::from("nonexistent_file.exe");
@@ -59,6 +61,7 @@ async fn test_sign_pe_file_with_invalid_pe() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
+        additional_certs: Vec::new(),
     };
 
     // Create a temporary file with invalid PE content
@@ -86,6 +89,7 @@ fn test_minimal_config() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: false,
+        additional_certs: Vec::new(),
     };
 
     assert_eq!(config.piv_slot.as_u8(), 0x9a);

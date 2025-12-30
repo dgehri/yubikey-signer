@@ -146,6 +146,13 @@ enum Commands {
         #[arg(long = "header", value_name = "HEADER", action = clap::ArgAction::Append)]
         headers: Vec<String>,
 
+        /// Additional certificate to include in the signature (can be repeated).
+        /// Use this to embed intermediate CA certificates in the signature block.
+        /// Accepts DER (.cer, .der) or PEM (.pem, .crt) format files.
+        /// Example: --additional-cert intermediate.cer --additional-cert root.cer
+        #[arg(long = "additional-cert", short = 'a', value_name = "CERT_FILE", action = clap::ArgAction::Append)]
+        additional_certs: Vec<PathBuf>,
+
         /// Dry run - validate configuration without signing
         #[arg(long)]
         dry_run: bool,
@@ -233,6 +240,7 @@ struct SignCommandArgs {
     timestamp: Option<String>,
     remote: Option<String>,
     headers: Vec<String>,
+    additional_certs: Vec<PathBuf>,
     dry_run: bool,
     verbose: bool,
 }
@@ -264,6 +272,7 @@ async fn main() -> Result<()> {
             timestamp,
             remote,
             headers,
+            additional_certs,
             dry_run,
             verbose,
         } => {
@@ -274,6 +283,7 @@ async fn main() -> Result<()> {
                 timestamp,
                 remote,
                 headers,
+                additional_certs,
                 dry_run,
                 verbose,
             };
@@ -329,6 +339,9 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
             .into_diagnostic()
             .context("YUBICO_PIN environment variable not set (required for local signing)")?;
 
+        // Load additional certificates if provided
+        let additional_certs = load_additional_certs(&args.additional_certs)?;
+
         // Signing configuration
         let signing_config = SigningConfig {
             pin: PivPin::new(pin).into_diagnostic()?,
@@ -340,6 +353,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
                 .into_diagnostic()?,
             hash_algorithm: HashAlgorithm::Sha256, // Auto-detected, this is just a default
             embed_certificate: true,
+            additional_certs,
         };
 
         if args.dry_run {
@@ -347,6 +361,12 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
             println!("  Input file: {}", args.input_file.display());
             println!("  Output file: {}", output_path.display());
             println!("  PIV slot: {}", signing_config.piv_slot);
+            if !signing_config.additional_certs.is_empty() {
+                println!(
+                    "  Additional certificates: {}",
+                    signing_config.additional_certs.len()
+                );
+            }
             if let Some(ref ts_url) = signing_config.timestamp_url {
                 println!("  Timestamp server: {}", ts_url.as_str());
             } else {
@@ -713,6 +733,50 @@ fn parse_headers(headers: &[String]) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
+/// Load additional certificates from file paths.
+///
+/// Accepts both DER (.cer, .der) and PEM (.pem, .crt) format certificates.
+/// Automatically detects the format based on file content.
+///
+/// # Arguments
+/// * `paths` - Vector of paths to certificate files
+///
+/// # Returns
+/// Vector of DER-encoded certificate bytes
+///
+/// # Errors
+/// Returns error if any certificate file cannot be read or parsed.
+fn load_additional_certs(paths: &[PathBuf]) -> Result<Vec<Vec<u8>>> {
+    let mut certs = Vec::new();
+
+    for path in paths {
+        let data = std::fs::read(path)
+            .into_diagnostic()
+            .with_context(|| format!("Failed to read certificate file: {}", path.display()))?;
+
+        // Try to detect format: PEM starts with "-----BEGIN"
+        let cert_der = if data.starts_with(b"-----BEGIN") {
+            // PEM format
+            let cert = openssl::x509::X509::from_pem(&data)
+                .into_diagnostic()
+                .with_context(|| format!("Failed to parse PEM certificate: {}", path.display()))?;
+            cert.to_der().into_diagnostic().with_context(|| {
+                format!("Failed to convert certificate to DER: {}", path.display())
+            })?
+        } else {
+            // Assume DER format - validate by parsing
+            let _cert = openssl::x509::X509::from_der(&data)
+                .into_diagnostic()
+                .with_context(|| format!("Failed to parse DER certificate: {}", path.display()))?;
+            data
+        };
+
+        certs.push(cert_der);
+    }
+
+    Ok(certs)
+}
+
 /// Handle remote signing via yubikey-proxy server.
 ///
 /// This function connects to a remote yubikey-proxy server to perform
@@ -743,6 +807,9 @@ async fn handle_remote_sign(
     // Parse extra headers (format: "Header-Name: value")
     let extra_headers = parse_headers(&args.headers)?;
 
+    // Load additional certificates if provided
+    let additional_certs = load_additional_certs(&args.additional_certs)?;
+
     // Read input file
     let file_data = std::fs::read(&args.input_file)
         .into_diagnostic()
@@ -761,6 +828,9 @@ async fn handle_remote_sign(
         if !extra_headers.is_empty() {
             println!("  Custom headers: {}", extra_headers.len());
         }
+        if !additional_certs.is_empty() {
+            println!("  Additional certificates: {}", additional_certs.len());
+        }
     }
 
     if args.dry_run {
@@ -768,6 +838,9 @@ async fn handle_remote_sign(
         println!("  Remote URL: {remote_url}");
         println!("  File type: {file_type_str}");
         println!("  PIV slot: {piv_slot}");
+        if !additional_certs.is_empty() {
+            println!("  Additional certificates: {}", additional_certs.len());
+        }
 
         // Check remote connection
         let config =
@@ -797,9 +870,25 @@ async fn handle_remote_sign(
 
     // Route to appropriate signer based on file type
     let signed_data = if is_msi {
-        handle_remote_msi_sign(args, &file_data, &client, &cert_der, piv_slot).await?
+        handle_remote_msi_sign(
+            args,
+            &file_data,
+            &client,
+            &cert_der,
+            piv_slot,
+            &additional_certs,
+        )
+        .await?
     } else {
-        handle_remote_pe_sign(args, &file_data, &client, &cert_der, piv_slot).await?
+        handle_remote_pe_sign(
+            args,
+            &file_data,
+            &client,
+            &cert_der,
+            piv_slot,
+            &additional_certs,
+        )
+        .await?
     };
 
     // Write output
@@ -824,11 +913,13 @@ async fn handle_remote_pe_sign(
     client: &RemoteSigner,
     cert_der: &[u8],
     piv_slot: PivSlot,
+    additional_certs: &[Vec<u8>],
 ) -> Result<Vec<u8>> {
-    // Create OpenSSL signer with remote certificate
+    // Create OpenSSL signer with remote certificate and additional certs
     let openssl_signer = OpenSslAuthenticodeSigner::new(cert_der, HashAlgorithm::Sha256)
         .into_diagnostic()
-        .context("Failed to create signer with remote certificate")?;
+        .context("Failed to create signer with remote certificate")?
+        .with_additional_certs(additional_certs.to_vec());
 
     // Compute TBS (to-be-signed) hash locally with context
     if args.verbose {
@@ -851,7 +942,6 @@ async fn handle_remote_pe_sign(
     if args.verbose {
         println!("[*] Building PKCS7 structure...");
     }
-
     // Get timestamp if requested
     let timestamp_token = get_timestamp_if_requested(args, &signature).await?;
 
@@ -876,11 +966,13 @@ async fn handle_remote_msi_sign(
     client: &RemoteSigner,
     cert_der: &[u8],
     piv_slot: PivSlot,
+    additional_certs: &[Vec<u8>],
 ) -> Result<Vec<u8>> {
-    // Create MSI signer with remote certificate
+    // Create MSI signer with remote certificate and additional certs
     let msi_signer = MsiSigner::new(cert_der, HashAlgorithm::Sha256)
         .into_diagnostic()
-        .context("Failed to create MSI signer with remote certificate")?;
+        .context("Failed to create MSI signer with remote certificate")?
+        .with_additional_certs(additional_certs.to_vec());
 
     // Compute TBS (to-be-signed) hash locally with context
     if args.verbose {

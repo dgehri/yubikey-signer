@@ -29,6 +29,7 @@ async fn test_complete_signing_workflow() {
             TimestampUrl::new("http://ts.ssl.com").expect("Should create valid URL"),
         ),
         embed_certificate: true,
+        additional_certs: Vec::new(),
     };
 
     // Use the real PE file we created
@@ -99,6 +100,7 @@ async fn test_signing_without_timestamp() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None, // No timestamp
         embed_certificate: true,
+        additional_certs: Vec::new(),
     };
 
     let input_path = "test_real.exe";
@@ -131,6 +133,7 @@ async fn test_signing_validation_only() {
         hash_algorithm: HashAlgorithm::Sha256,
         timestamp_url: None,
         embed_certificate: true,
+        additional_certs: Vec::new(),
     };
 
     // Test YubiKey connection

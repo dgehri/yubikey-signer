@@ -241,6 +241,7 @@ mod configuration_tests {
                 TimestampUrl::new("https://timestamp.digicert.com").expect("Valid URL"),
             ),
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         assert!(
@@ -441,6 +442,7 @@ mod error_recovery_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         let result = tokio_test::block_on(yubikey_signer::sign_pe_file(
@@ -484,6 +486,7 @@ mod error_recovery_tests {
             hash_algorithm: HashAlgorithm::Sha256,
             timestamp_url: None,
             embed_certificate: true,
+            additional_certs: Vec::new(),
         };
 
         let result = tokio_test::block_on(yubikey_signer::sign_pe_file(

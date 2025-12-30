@@ -46,6 +46,7 @@ impl MsiTbsContext {
 /// MSI file signer using Authenticode format.
 pub struct MsiSigner {
     certificate: X509,
+    additional_certs: Vec<Vec<u8>>,
     hash_algorithm: HashAlgorithm,
     use_msi_digital_signature_ex: bool,
 }
@@ -68,9 +69,25 @@ impl MsiSigner {
 
         Ok(Self {
             certificate,
+            additional_certs: Vec::new(),
             hash_algorithm,
             use_msi_digital_signature_ex: false,
         })
+    }
+
+    /// Set additional certificates to include in the signature.
+    ///
+    /// These certificates (typically intermediate CAs) will be embedded in the
+    /// PKCS#7 `SignedData` certificates field alongside the signing certificate.
+    /// This enables Windows to build the full certificate chain without needing
+    /// to fetch intermediates from the network or local stores.
+    ///
+    /// # Arguments
+    /// * `certs` - Vector of DER-encoded certificate bytes
+    #[must_use]
+    pub fn with_additional_certs(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.additional_certs = certs;
+        self
     }
 
     /// Enable or disable `MsiDigitalSignatureEx` (metadata hashing).
@@ -183,7 +200,8 @@ impl MsiSigner {
             cert_der,
             self.hash_algorithm,
             true, /* embed_certificate */
-        );
+        )
+        .with_additional_certs(self.additional_certs.clone());
 
         let pkcs7_der = pkcs7_service
             .build_signed_with_timestamp(
