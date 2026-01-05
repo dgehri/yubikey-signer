@@ -54,7 +54,7 @@ cfb = "0.12"
 
 # HTTP client for timestamping
 reqwest = { version = "0.12.23", features = ["rustls-tls", "json"] }
-tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "fs"] }
 
 # HTTP server for proxy (optional)
 warp = { version = "0.3", optional = true, features = ["tls"] }
