@@ -907,7 +907,7 @@ impl OpenSslAuthenticodeSigner {
         &self,
         hasher: &mut Box<dyn DynDigest>,
         pe_data: &[u8],
-        _pe_info: &PeInfo,
+        pe_info: &PeInfo,
     ) -> SigningResult<()> {
         if pe_data.len() < 64 {
             return Err(SigningError::PeParsingError("File too small for PE".into()));
@@ -922,7 +922,7 @@ impl OpenSslAuthenticodeSigner {
         let pe32plus = usize::from(magic == 0x20B);
         let cert_table_offset = header_size + 152 + pe32plus * 16;
         let file_len = pe_data.len();
-        let (sigpos, _siglen) = if cert_table_offset + 8 <= pe_data.len() {
+        let (sigpos, siglen) = if cert_table_offset + 8 <= pe_data.len() {
             let rva = u32::from_le_bytes([
                 pe_data[cert_table_offset],
                 pe_data[cert_table_offset + 1],
@@ -943,7 +943,23 @@ impl OpenSslAuthenticodeSigner {
         } else {
             (0, 0)
         };
-        let fileend = if sigpos > 0 { sigpos } else { file_len };
+
+        // Detect overlay data (bytes after end-of-image). For overlay-bearing files (e.g. WiX Burn
+        // bundles), we embed the certificate table before the overlay, so Authenticode hashing must
+        // *not* apply the unsigned-file 8-byte padding rule.
+        let mut end_of_image = 0usize;
+        if let Some(optional_header) = pe_info.pe.header.optional_header {
+            end_of_image =
+                end_of_image.max(optional_header.windows_fields.size_of_headers as usize);
+        }
+        for section in &pe_info.pe.sections {
+            let start = section.pointer_to_raw_data as usize;
+            let size = section.size_of_raw_data as usize;
+            end_of_image = end_of_image.max(start.saturating_add(size));
+        }
+        end_of_image = end_of_image.min(file_len);
+        let has_overlay = end_of_image < file_len;
+
         let mut idx = 0;
         let range1_end = header_size + 88;
         hasher.update(&pe_data[idx..range1_end]);
@@ -952,10 +968,23 @@ impl OpenSslAuthenticodeSigner {
         let range2_end = idx + range2_len;
         hasher.update(&pe_data[idx..range2_end]);
         idx = range2_end + 8;
-        if idx < fileend {
-            hasher.update(&pe_data[idx..fileend]);
+
+        // Hash the remainder of the file, skipping the certificate table bytes if present.
+        let mut cursor = idx;
+        if sigpos > 0 {
+            let sigend = sigpos.saturating_add(siglen);
+            if sigend <= file_len {
+                if cursor < sigpos {
+                    hasher.update(&pe_data[cursor..sigpos]);
+                }
+                cursor = sigend;
+            }
         }
-        if sigpos == 0 {
+        if cursor < file_len {
+            hasher.update(&pe_data[cursor..file_len]);
+        }
+
+        if sigpos == 0 && !has_overlay {
             let pad_len = 8 - (file_len % 8);
             if pad_len > 0 && pad_len != 8 {
                 hasher.update(&vec![0u8; pad_len]);
