@@ -155,6 +155,80 @@ pub fn find_certificate_directory_offset(data: &[u8]) -> SigningResult<usize> {
     Ok(cert_dir_entry_offset)
 }
 
+/// Strip an existing certificate table from a PE file for re-signing.
+///
+/// This helper supports the common case where an Authenticode signature is stored in the
+/// `IMAGE_DIRECTORY_ENTRY_SECURITY` / `WIN_CERTIFICATE` table at the end of the file.
+///
+/// The function:
+/// - Locates the security directory entry.
+/// - If it points to a valid region, clears the directory entry (sets offset/size to 0).
+/// - If the certificate table ends at EOF, truncates the file to the certificate-table offset.
+/// - Recomputes the PE checksum.
+///
+/// This enables workflows that re-sign already signed PE files (including `WiX` Burn bundles).
+///
+/// # Parameters
+/// - `data`: The full PE file bytes.
+///
+/// # Errors
+/// Returns an error if the PE is malformed, if the certificate directory points outside the
+/// file, or if the checksum field cannot be located.
+pub fn strip_certificate_table_for_resigning(data: &[u8]) -> SigningResult<Vec<u8>> {
+    let cert_dir_offset = find_certificate_directory_offset(data)?;
+    let sigpos = u32::from_le_bytes([
+        data[cert_dir_offset],
+        data[cert_dir_offset + 1],
+        data[cert_dir_offset + 2],
+        data[cert_dir_offset + 3],
+    ]) as usize;
+    let siglen = u32::from_le_bytes([
+        data[cert_dir_offset + 4],
+        data[cert_dir_offset + 5],
+        data[cert_dir_offset + 6],
+        data[cert_dir_offset + 7],
+    ]) as usize;
+
+    // Already unsigned.
+    if sigpos == 0 || siglen == 0 {
+        return Ok(data.to_vec());
+    }
+
+    let sigend = sigpos
+        .checked_add(siglen)
+        .ok_or_else(|| SigningError::PeParsingError("Certificate table length overflow".into()))?;
+    if sigpos >= data.len() || sigend > data.len() {
+        return Err(SigningError::PeParsingError(
+            "Certificate table points outside the file".into(),
+        ));
+    }
+
+    let mut out = data.to_vec();
+    // Clear security directory entry.
+    out[cert_dir_offset..cert_dir_offset + 8].fill(0);
+
+    // If the certificate table is at EOF (typical), truncate to remove signature bytes.
+    // If it's not at EOF, we keep the bytes to avoid shifting file offsets (but the directory
+    // is cleared, so the file is treated as unsigned by Authenticode rules).
+    if sigend == out.len() {
+        out.truncate(sigpos);
+    } else {
+        log::warn!(
+            "PE certificate table not at EOF (sigpos={}, siglen={}, filelen={}): clearing directory entry but not truncating",
+            sigpos,
+            siglen,
+            out.len()
+        );
+    }
+
+    // Recompute checksum.
+    let pe_off = u32::from_le_bytes([out[60], out[61], out[62], out[63]]) as usize;
+    let checksum_offset = pe_off + 24 + 64;
+    update_pe_checksum(&mut out, checksum_offset)?;
+
+    Ok(out)
+}
+
 /// PE Certificate Directory entry
 #[derive(Debug, Clone)]
 pub struct PECertificateDirectory {

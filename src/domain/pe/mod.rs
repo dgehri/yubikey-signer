@@ -141,7 +141,8 @@ pub use signed_types::{
 
 pub use hash_view::PeHashView;
 pub use layout::{
-    calculate_pe_checksum, find_certificate_directory_offset, parse_pe, update_pe_checksum,
-    PECertificateDirectory, PeInfo, WinCertificate,
+    calculate_pe_checksum, find_certificate_directory_offset, parse_pe,
+    strip_certificate_table_for_resigning, update_pe_checksum, PECertificateDirectory, PeInfo,
+    WinCertificate,
 };
 pub use parse::{PeParseError, PeRaw};

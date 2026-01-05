@@ -321,8 +321,12 @@ fn phase6_embedder_preserves_overlay_at_eof() {
         pe
     }
 
+    // Use an overlay length that makes the file NOT 8-byte aligned.
+    // The embedder must still sign by appending at EOF without inserting pre-padding, preserving
+    // overlay bytes and offsets (important for WiX Burn bundles).
     let overlay_len = 123;
     let pe = make_pe32_with_one_section_and_overlay(overlay_len);
+    let original_len = pe.len();
     let unsigned = UnsignedPeFile::new(pe.clone()).expect("unsigned");
 
     let fake_pkcs7 = Pkcs7SignedData::from_der(vec![0x30, 0x03, 0x02, 0x01, 0x01]);
@@ -333,12 +337,22 @@ fn phase6_embedder_preserves_overlay_at_eof() {
         .expect("embed");
 
     let out = signed.bytes();
+
+    // The overlay bytes must remain intact at the same offset (end-of-image = 0x400).
+    let end_of_image = 0x400usize;
     assert!(
-        out.len() >= overlay_len && out[out.len() - overlay_len..].iter().all(|b| *b == 0xAA),
-        "expected overlay bytes to remain last bytes"
+        out.len() > end_of_image + overlay_len,
+        "expected signed file to be larger than unsigned (signature appended)"
+    );
+    assert!(
+        out[end_of_image..end_of_image + overlay_len]
+            .iter()
+            .all(|b| *b == 0xAA),
+        "expected overlay bytes to be unchanged"
     );
 
-    // The certificate table should start at the end-of-image (0x400), not at EOF.
+    // The certificate table should start at the original EOF (signature appended), not at
+    // end-of-image.
     let cert_dir_offset = 0x80 + 24 + 96 + 32;
     let cert_rva = u32::from_le_bytes([
         out[cert_dir_offset],
@@ -346,10 +360,7 @@ fn phase6_embedder_preserves_overlay_at_eof() {
         out[cert_dir_offset + 2],
         out[cert_dir_offset + 3],
     ]) as usize;
-    assert_eq!(
-        cert_rva, 0x400,
-        "expected signature inserted before overlay"
-    );
+    assert_eq!(cert_rva, original_len, "expected signature appended at EOF");
 }
 
 #[test]

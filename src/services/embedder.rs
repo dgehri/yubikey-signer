@@ -33,20 +33,33 @@ impl PeSignatureEmbedderService {
         let pkcs7_der = pkcs7.as_der();
         Self::assert_no_existing_certificate(&signed_pe)?;
 
-        // If the PE has an overlay (data after the end of the last section), we must not
-        // append the signature after it, because some formats (e.g. WiX Burn bundles) expect
-        // their attached container to remain the last bytes in the file.
+        // If the PE has an overlay (data after the end of the last section), we must NOT insert
+        // bytes before the overlay, because overlay-based formats (e.g. WiX Burn bundles) expect
+        // their attached container to start at a specific offset (typically end-of-image).
+        //
+        // At the same time, Windows expects the certificate table to be the last data in the file
+        // (see post-MS12-024 behavior), so we keep the signature at EOF.
         let overlay_start = Self::overlay_start(&signed_pe);
         let has_overlay = overlay_start < signed_pe.len();
-        if has_overlay && !overlay_start.is_multiple_of(8) {
-            return Err(SigningError::ValidationError(
-                "PE overlay start is not 8-byte aligned; refusing to embed signature before overlay"
-                    .into(),
-            ));
+
+        // The certificate table is specified to start on an 8-byte boundary.
+        //
+        // However, for overlay-bearing files we must not insert padding bytes before the
+        // signature, because that would shift the overlay/container bytes and can break formats
+        // like WiX Burn bundles.
+        //
+        // Empirically, Windows is much more sensitive to signature placement at EOF than to the
+        // 8-byte alignment of the certificate-table start offset, so we prefer preserving the
+        // overlay and signing at EOF.
+        if has_overlay && !signed_pe.len().is_multiple_of(8) {
+            log::warn!(
+                "PE has an overlay and is not 8-byte aligned (len={}): appending WIN_CERTIFICATE at EOF without pre-padding to preserve overlay bytes",
+                signed_pe.len()
+            );
         }
 
-        // For normal PE files without overlays, Authenticode hashing pads unsigned files to an
-        // 8-byte boundary. We materialize that padding before appending the WIN_CERTIFICATE.
+        // For typical PE files (no overlay), Authenticode requires the certificate table offset
+        // to be 8-byte aligned. Materialize any needed padding bytes before appending.
         if !has_overlay {
             let pre_pad = (8 - (signed_pe.len() % 8)) % 8;
             if pre_pad > 0 {
@@ -64,18 +77,8 @@ impl PeSignatureEmbedderService {
             win_cert.extend(std::iter::repeat_n(0u8, padlen));
         }
 
-        let signature_offset = if has_overlay {
-            let mut out = Vec::with_capacity(signed_pe.len() + win_cert.len());
-            out.extend_from_slice(&signed_pe[..overlay_start]);
-            out.extend_from_slice(&win_cert);
-            out.extend_from_slice(&signed_pe[overlay_start..]);
-            signed_pe = out;
-            overlay_start
-        } else {
-            let signature_offset = signed_pe.len();
-            signed_pe.extend_from_slice(&win_cert);
-            signature_offset
-        };
+        let signature_offset = signed_pe.len();
+        signed_pe.extend_from_slice(&win_cert);
 
         let cert_dir_offset = Self::security_directory_offset(&signed_pe)?;
         signed_pe[cert_dir_offset..cert_dir_offset + 4]
@@ -96,8 +99,8 @@ impl PeSignatureEmbedderService {
     /// Determine the start offset of any PE overlay.
     ///
     /// The overlay is defined as any data appended after the end of the last section's raw data.
-    /// For typical `WiX` Burn bundles, the attached container lives in the overlay and must remain
-    /// the last bytes in the file.
+    /// For typical `WiX` Burn bundles, the attached container lives in the overlay; we must keep
+    /// the overlay start offset and its bytes intact.
     ///
     /// # Parameters
     /// - `bytes`: Full PE file bytes.
@@ -207,7 +210,6 @@ impl PeSignatureEmbedderService {
             (0, 0)
         };
         let sigend = sigpos.saturating_add(siglen);
-        let has_overlay = Self::overlay_start(signed_pe) < signed_pe.len();
         use sha2::{Digest, Sha256, Sha384, Sha512};
         let mut hasher = match original_pe_hash.len() {
             32 => Box::new(Sha256::new()) as Box<dyn sha2::digest::DynDigest>,
@@ -233,7 +235,7 @@ impl PeSignatureEmbedderService {
         if cursor < file_len {
             hasher.update(&signed_pe[cursor..file_len]);
         }
-        if sigpos == 0 && !has_overlay {
+        if sigpos == 0 {
             let pad_len = 8 - (file_len % 8);
             if pad_len > 0 && pad_len != 8 {
                 hasher.update(&vec![0u8; pad_len]);
