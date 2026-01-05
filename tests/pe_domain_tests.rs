@@ -260,6 +260,110 @@ fn phase6_embedder_rejects_already_signed() {
 }
 
 #[test]
+fn phase6_embedder_preserves_overlay_at_eof() {
+    // Construct a small-but-parseable PE32 with a single section, then append an overlay.
+    // The overlay simulates formats like WiX Burn bundles that keep an attached container
+    // after the PE image.
+    fn make_pe32_with_one_section_and_overlay(overlay_len: usize) -> Vec<u8> {
+        let pe_off = 0x80usize;
+        let size_of_optional_header = 0xE0usize; // PE32
+        let section_table_off = pe_off + 24 + size_of_optional_header;
+        let section_raw_off = 0x200usize;
+        let section_raw_size = 0x200usize;
+        let end_of_image = section_raw_off + section_raw_size; // 0x400
+
+        let mut pe = vec![0u8; end_of_image + overlay_len];
+        pe[0] = b'M';
+        pe[1] = b'Z';
+        pe[0x3C..0x40].copy_from_slice(&(pe_off as u32).to_le_bytes());
+        pe[pe_off..pe_off + 4].copy_from_slice(b"PE\0\0");
+
+        // COFF header (20 bytes) after signature
+        // Machine: 0x014c (Intel 386), NumberOfSections: 1, SizeOfOptionalHeader: 0xE0
+        let coff_off = pe_off + 4;
+        pe[coff_off..coff_off + 2].copy_from_slice(&0x014Cu16.to_le_bytes());
+        pe[coff_off + 2..coff_off + 4].copy_from_slice(&1u16.to_le_bytes());
+        pe[coff_off + 16..coff_off + 18]
+            .copy_from_slice(&(size_of_optional_header as u16).to_le_bytes());
+        pe[coff_off + 18..coff_off + 20].copy_from_slice(&0x010Fu16.to_le_bytes());
+
+        // Optional header start
+        let opt_off = pe_off + 24;
+        pe[opt_off..opt_off + 2].copy_from_slice(&0x010Bu16.to_le_bytes()); // PE32
+
+        // SectionAlignment (optional header offset 32) and FileAlignment (offset 36)
+        pe[opt_off + 32..opt_off + 36].copy_from_slice(&0x1000u32.to_le_bytes());
+        pe[opt_off + 36..opt_off + 40].copy_from_slice(&0x0200u32.to_le_bytes());
+        // SizeOfHeaders (optional header offset 60)
+        pe[opt_off + 60..opt_off + 64].copy_from_slice(&0x0200u32.to_le_bytes());
+        // NumberOfRvaAndSizes (optional header offset 92)
+        pe[opt_off + 92..opt_off + 96].copy_from_slice(&16u32.to_le_bytes());
+        // Certificate Table directory entry (index 4) left as 0 for unsigned.
+
+        // Section header (40 bytes)
+        pe[section_table_off..section_table_off + 8].copy_from_slice(b".text\0\0\0");
+        // VirtualSize
+        pe[section_table_off + 8..section_table_off + 12].copy_from_slice(&0x0200u32.to_le_bytes());
+        // VirtualAddress
+        pe[section_table_off + 12..section_table_off + 16]
+            .copy_from_slice(&0x1000u32.to_le_bytes());
+        // SizeOfRawData
+        pe[section_table_off + 16..section_table_off + 20]
+            .copy_from_slice(&(section_raw_size as u32).to_le_bytes());
+        // PointerToRawData
+        pe[section_table_off + 20..section_table_off + 24]
+            .copy_from_slice(&(section_raw_off as u32).to_le_bytes());
+
+        // Fill overlay with a recognizable pattern.
+        for b in &mut pe[end_of_image..] {
+            *b = 0xAA;
+        }
+        pe
+    }
+
+    // Use an overlay length that makes the file NOT 8-byte aligned.
+    // The embedder must still sign by appending at EOF without inserting pre-padding, preserving
+    // overlay bytes and offsets (important for WiX Burn bundles).
+    let overlay_len = 123;
+    let pe = make_pe32_with_one_section_and_overlay(overlay_len);
+    let original_len = pe.len();
+    let unsigned = UnsignedPeFile::new(pe.clone()).expect("unsigned");
+
+    let fake_pkcs7 = Pkcs7SignedData::from_der(vec![0x30, 0x03, 0x02, 0x01, 0x01]);
+    let embedder = PeSignatureEmbedderService::new();
+    let original_hash = vec![0u8; 32];
+    let signed = embedder
+        .embed(&unsigned, &fake_pkcs7, &original_hash)
+        .expect("embed");
+
+    let out = signed.bytes();
+
+    // The overlay bytes must remain intact at the same offset (end-of-image = 0x400).
+    let end_of_image = 0x400usize;
+    assert!(
+        out.len() > end_of_image + overlay_len,
+        "expected signed file to be larger than unsigned (signature appended)"
+    );
+    assert!(
+        out[end_of_image..end_of_image + overlay_len]
+            .iter()
+            .all(|b| *b == 0xAA),
+        "expected overlay bytes to be unchanged"
+    );
+
+    // The certificate table should start at the original EOF (signature appended), not at
+    // end-of-image.
+    let cert_dir_offset = 0x80 + 24 + 96 + 32;
+    let cert_rva = u32::from_le_bytes([
+        out[cert_dir_offset],
+        out[cert_dir_offset + 1],
+        out[cert_dir_offset + 2],
+        out[cert_dir_offset + 3],
+    ]) as usize;
+    assert_eq!(cert_rva, original_len, "expected signature appended at EOF");
+}
+
+#[test]
 fn parse_rejects_missing_mz() {
     let buf = vec![0u8; 128];
     let err = PeRaw::parse(&buf).unwrap_err();

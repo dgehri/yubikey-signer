@@ -915,6 +915,13 @@ async fn handle_remote_pe_sign(
     piv_slot: PivSlot,
     additional_certs: &[Vec<u8>],
 ) -> Result<Vec<u8>> {
+    // Allow re-signing: if the input already contains an Authenticode certificate table,
+    // strip it before computing the TBS/PE hash so the signature corresponds to the unsigned
+    // payload bytes.
+    let pe_data = yubikey_signer::domain::pe::strip_certificate_table_for_resigning(pe_data)
+        .into_diagnostic()
+        .context("Failed to prepare PE for signing")?;
+
     // Create OpenSSL signer with remote certificate and additional certs
     let openssl_signer = OpenSslAuthenticodeSigner::new(cert_der, HashAlgorithm::Sha256)
         .into_diagnostic()
@@ -926,7 +933,7 @@ async fn handle_remote_pe_sign(
         println!("[*] Computing TBS hash (authenticated attributes)...");
     }
     let tbs_context = openssl_signer
-        .compute_tbs_hash_with_context(pe_data)
+        .compute_tbs_hash_with_context(&pe_data)
         .into_diagnostic()?;
 
     // Sign TBS hash remotely
@@ -948,7 +955,7 @@ async fn handle_remote_pe_sign(
     // Create signed PE using preserved context
     let signed_pe = openssl_signer
         .create_signed_pe_with_context(
-            pe_data,
+            &pe_data,
             &tbs_context,
             &signature,
             timestamp_token.as_deref(),

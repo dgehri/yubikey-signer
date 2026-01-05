@@ -46,6 +46,9 @@ impl SignWorkflow {
         let output_path = output.as_ref();
         let file_data = std::fs::read(input_path)
             .map_err(|e| SigningError::IoError(format!("Failed to read input file: {e}")))?;
+        // If the input is already signed, strip the existing certificate table before hashing.
+        // This allows re-signing build artifacts without requiring a separate "unsign" step.
+        let file_data = pe::strip_certificate_table_for_resigning(&file_data)?;
         let _ = pe::parse_pe(&file_data)?; // validate early
 
         let mut yubikey_ops = YubiKeyOperations::connect()?;

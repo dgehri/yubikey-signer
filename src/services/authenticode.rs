@@ -907,7 +907,7 @@ impl OpenSslAuthenticodeSigner {
         &self,
         hasher: &mut Box<dyn DynDigest>,
         pe_data: &[u8],
-        _pe_info: &PeInfo,
+        pe_info: &PeInfo,
     ) -> SigningResult<()> {
         if pe_data.len() < 64 {
             return Err(SigningError::PeParsingError("File too small for PE".into()));
@@ -922,7 +922,7 @@ impl OpenSslAuthenticodeSigner {
         let pe32plus = usize::from(magic == 0x20B);
         let cert_table_offset = header_size + 152 + pe32plus * 16;
         let file_len = pe_data.len();
-        let (sigpos, _siglen) = if cert_table_offset + 8 <= pe_data.len() {
+        let (sigpos, siglen) = if cert_table_offset + 8 <= pe_data.len() {
             let rva = u32::from_le_bytes([
                 pe_data[cert_table_offset],
                 pe_data[cert_table_offset + 1],
@@ -943,7 +943,11 @@ impl OpenSslAuthenticodeSigner {
         } else {
             (0, 0)
         };
-        let fileend = if sigpos > 0 { sigpos } else { file_len };
+        // Note: We intentionally do not special-case overlays here. Authenticode hashing is defined
+        // over the full file contents while skipping the certificate table bytes (if present).
+        // For unsigned files, hashing pads with zeros up to an 8-byte boundary.
+        let _ = pe_info;
+
         let mut idx = 0;
         let range1_end = header_size + 88;
         hasher.update(&pe_data[idx..range1_end]);
@@ -952,9 +956,22 @@ impl OpenSslAuthenticodeSigner {
         let range2_end = idx + range2_len;
         hasher.update(&pe_data[idx..range2_end]);
         idx = range2_end + 8;
-        if idx < fileend {
-            hasher.update(&pe_data[idx..fileend]);
+
+        // Hash the remainder of the file, skipping the certificate table bytes if present.
+        let mut cursor = idx;
+        if sigpos > 0 {
+            let sigend = sigpos.saturating_add(siglen);
+            if sigend <= file_len {
+                if cursor < sigpos {
+                    hasher.update(&pe_data[cursor..sigpos]);
+                }
+                cursor = sigend;
+            }
         }
+        if cursor < file_len {
+            hasher.update(&pe_data[cursor..file_len]);
+        }
+
         if sigpos == 0 {
             let pad_len = 8 - (file_len % 8);
             if pad_len > 0 && pad_len != 8 {
