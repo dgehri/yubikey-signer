@@ -963,11 +963,15 @@ impl OpenSslAuthenticodeSigner {
             (0, 0)
         };
 
-        // Calculate end-of-image (overlay start) for unsigned files.
-        // For overlay-bearing PE files (e.g. WiX Burn bundles), Authenticode hashes only the PE
-        // image proper, not the appended overlay data.
-        let end_of_image = Self::compute_end_of_image(pe_data, pe_info);
+        // NOTE: The reference implementation hashes the full file for unsigned files,
+        // INCLUDING any overlay data. The overlay is NOT excluded from the hash.
+        // This is because Windows verifies by hashing from 0 to sigpos (the signature offset),
+        // and for unsigned files, the signature will be appended at EOF (after the overlay).
         let _ = pe_info;
+
+        log::debug!(
+            "PE hash params: file_len={file_len}, sigpos={sigpos}, siglen={siglen}, pe32plus={pe32plus}"
+        );
 
         let mut idx = 0;
         let range1_end = header_size + 88;
@@ -978,15 +982,13 @@ impl OpenSslAuthenticodeSigner {
         hasher.update(&pe_data[idx..range2_end]);
         idx = range2_end + 8;
 
-        // Hash the remainder of the PE image, skipping the certificate table bytes if present.
-        // For unsigned files with overlay, we hash only up to end_of_image.
-        let hash_end = if sigpos > 0 {
-            // Signed file: hash up to sigpos, skip certificate table
-            file_len
-        } else {
-            // Unsigned file: hash up to end-of-image (excludes overlay)
-            end_of_image
-        };
+        // For unsigned files: hash up to EOF (file_len), including any overlay.
+        // For signed files: hash up to sigpos, skip certificate table.
+        // The hash_end is always file_len because:
+        // - Unsigned files: we hash the full file including overlay
+        // - Signed files: we hash up to sigpos, then skip signature, then continue to EOF
+        let hash_end = file_len;
+        log::debug!("PE hash: hash_end={hash_end}, idx={idx}");
 
         let mut cursor = idx;
         if sigpos > 0 {
@@ -1002,10 +1004,20 @@ impl OpenSslAuthenticodeSigner {
             hasher.update(&pe_data[cursor..hash_end]);
         }
 
-        // Pad unsigned files to 8-byte boundary (from end_of_image, not file_len).
+        // Pad unsigned files to 8-byte boundary, but ONLY if the file has no overlay.
+        //
+        // Per Authenticode spec, unsigned PE files are padded to 8-byte boundary before
+        // the signature is appended. The hash must match what Windows will compute over
+        // the signed file content [0..sigpos].
+        //
+        // The padding applies to ALL unsigned files, including those with overlays.
+        // The embedder will add padding after the overlay but before the signature.
+        // Windows requires the WIN_CERTIFICATE to start at an 8-byte aligned offset,
+        // so both the embedder and the hash must account for this padding.
         if sigpos == 0 {
-            let pad_len = (8 - (end_of_image % 8)) % 8;
+            let pad_len = (8 - (file_len % 8)) % 8;
             if pad_len > 0 {
+                log::debug!("Adding {pad_len} bytes of padding to hash (file_len={file_len})");
                 hasher.update(&vec![0u8; pad_len]);
             }
         }
@@ -1026,6 +1038,7 @@ impl OpenSslAuthenticodeSigner {
     ///
     /// # Returns
     /// The file offset where the PE image ends (and overlay begins, if present).
+    #[allow(dead_code)]
     fn compute_end_of_image(pe_data: &[u8], _pe_info: &PeInfo) -> usize {
         // Parse sections to find end of raw data. We reparse here since pe_info.pe lifetime
         // is 'static transmuted and we want fresh parsing for safety.

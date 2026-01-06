@@ -43,28 +43,23 @@ impl PeSignatureEmbedderService {
         let has_overlay = overlay_start < signed_pe.len();
 
         // The certificate table is specified to start on an 8-byte boundary.
+        // This is a Windows requirement - signatures at unaligned offsets are rejected with
+        // error 0x80096010 "The digital signature of the object did not verify".
         //
-        // However, for overlay-bearing files we must not insert padding bytes before the
-        // signature, because that would shift the overlay/container bytes and can break formats
-        // like WiX Burn bundles.
-        //
-        // Empirically, Windows is much more sensitive to signature placement at EOF than to the
-        // 8-byte alignment of the certificate-table start offset, so we prefer preserving the
-        // overlay and signing at EOF.
-        if has_overlay && !signed_pe.len().is_multiple_of(8) {
-            log::warn!(
-                "PE has an overlay and is not 8-byte aligned (len={}): appending WIN_CERTIFICATE at EOF without pre-padding to preserve overlay bytes",
-                signed_pe.len()
-            );
-        }
-
-        // For typical PE files (no overlay), Authenticode requires the certificate table offset
-        // to be 8-byte aligned. Materialize any needed padding bytes before appending.
-        if !has_overlay {
-            let pre_pad = (8 - (signed_pe.len() % 8)) % 8;
-            if pre_pad > 0 {
-                signed_pe.extend(std::iter::repeat_n(0u8, pre_pad));
+        // For overlay-bearing files (e.g., WiX Burn bundles), the padding bytes are appended
+        // AFTER the overlay but BEFORE the signature. The overlay container itself is not
+        // modified - only padding is added at EOF to ensure proper alignment. This padding
+        // becomes part of the file and must be included in the Authenticode hash computation.
+        let pre_pad = (8 - (signed_pe.len() % 8)) % 8;
+        if pre_pad > 0 {
+            if has_overlay {
+                log::info!(
+                    "PE has overlay and is not 8-byte aligned (len={}): adding {} padding bytes before WIN_CERTIFICATE",
+                    signed_pe.len(),
+                    pre_pad
+                );
             }
+            signed_pe.extend(std::iter::repeat_n(0u8, pre_pad));
         }
         let padlen = (8 - ((8 + pkcs7_der.len()) % 8)) % 8;
         let dw_length = 8 + pkcs7_der.len() + padlen;
