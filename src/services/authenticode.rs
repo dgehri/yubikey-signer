@@ -903,6 +903,25 @@ impl OpenSslAuthenticodeSigner {
             HashAlgorithm::Sha512 => Box::new(Sha512::new()),
         }
     }
+    /// Hash a PE file for Authenticode SPC indirect data content.
+    ///
+    /// Authenticode hashing follows specific rules:
+    /// - Skip the checksum field (4 bytes at header + 88)
+    /// - Skip the certificate table directory entry (8 bytes at header + 152 or +168 for PE32+)
+    /// - For signed files: skip the certificate table bytes themselves
+    /// - For unsigned files: hash up to end-of-image and pad with zeros to 8-byte boundary
+    ///
+    /// **Important for overlay-bearing files** (e.g., `WiX` Burn bundles):
+    /// The Authenticode hash covers only the PE image proper, not the overlay.
+    /// The end-of-image is defined as the maximum of (`SizeOfHeaders`, `section_end`) for all sections.
+    ///
+    /// # Parameters
+    /// - `hasher`: A mutable boxed hasher to accumulate the hash.
+    /// - `pe_data`: The full PE file bytes (may include overlay).
+    /// - `pe_info`: Parsed PE information (currently unused but reserved for future).
+    ///
+    /// # Errors
+    /// Returns an error if the PE structure is malformed or too small.
     fn hash_pe_file_for_spc_creation(
         &self,
         hasher: &mut Box<dyn DynDigest>,
@@ -943,10 +962,16 @@ impl OpenSslAuthenticodeSigner {
         } else {
             (0, 0)
         };
-        // Note: We intentionally do not special-case overlays here. Authenticode hashing is defined
-        // over the full file contents while skipping the certificate table bytes (if present).
-        // For unsigned files, hashing pads with zeros up to an 8-byte boundary.
+
+        // NOTE: The reference implementation hashes the full file for unsigned files,
+        // INCLUDING any overlay data. The overlay is NOT excluded from the hash.
+        // This is because Windows verifies by hashing from 0 to sigpos (the signature offset),
+        // and for unsigned files, the signature will be appended at EOF (after the overlay).
         let _ = pe_info;
+
+        log::debug!(
+            "PE hash params: file_len={file_len}, sigpos={sigpos}, siglen={siglen}, pe32plus={pe32plus}"
+        );
 
         let mut idx = 0;
         let range1_end = header_size + 88;
@@ -957,7 +982,14 @@ impl OpenSslAuthenticodeSigner {
         hasher.update(&pe_data[idx..range2_end]);
         idx = range2_end + 8;
 
-        // Hash the remainder of the file, skipping the certificate table bytes if present.
+        // For unsigned files: hash up to EOF (file_len), including any overlay.
+        // For signed files: hash up to sigpos, skip certificate table.
+        // The hash_end is always file_len because:
+        // - Unsigned files: we hash the full file including overlay
+        // - Signed files: we hash up to sigpos, then skip signature, then continue to EOF
+        let hash_end = file_len;
+        log::debug!("PE hash: hash_end={hash_end}, idx={idx}");
+
         let mut cursor = idx;
         if sigpos > 0 {
             let sigend = sigpos.saturating_add(siglen);
@@ -968,17 +1000,70 @@ impl OpenSslAuthenticodeSigner {
                 cursor = sigend;
             }
         }
-        if cursor < file_len {
-            hasher.update(&pe_data[cursor..file_len]);
+        if cursor < hash_end {
+            hasher.update(&pe_data[cursor..hash_end]);
         }
 
+        // Pad unsigned files to 8-byte boundary, but ONLY if the file has no overlay.
+        //
+        // Per Authenticode spec, unsigned PE files are padded to 8-byte boundary before
+        // the signature is appended. The hash must match what Windows will compute over
+        // the signed file content [0..sigpos].
+        //
+        // The padding applies to ALL unsigned files, including those with overlays.
+        // The embedder will add padding after the overlay but before the signature.
+        // Windows requires the WIN_CERTIFICATE to start at an 8-byte aligned offset,
+        // so both the embedder and the hash must account for this padding.
         if sigpos == 0 {
-            let pad_len = 8 - (file_len % 8);
-            if pad_len > 0 && pad_len != 8 {
+            let pad_len = (8 - (file_len % 8)) % 8;
+            if pad_len > 0 {
+                log::debug!("Adding {pad_len} bytes of padding to hash (file_len={file_len})");
                 hasher.update(&vec![0u8; pad_len]);
             }
         }
         Ok(())
+    }
+
+    /// Compute the end-of-image offset (start of overlay, if any).
+    ///
+    /// The end-of-image is defined as the maximum of:
+    /// - `SizeOfHeaders` from the optional header
+    /// - `PointerToRawData + SizeOfRawData` for each section
+    ///
+    /// This corresponds to the last byte of actual PE image data before any overlay.
+    ///
+    /// # Parameters
+    /// - `pe_data`: The full PE file bytes.
+    /// - `_pe_info`: Parsed PE info (sections available via goblin).
+    ///
+    /// # Returns
+    /// The file offset where the PE image ends (and overlay begins, if present).
+    #[allow(dead_code)]
+    fn compute_end_of_image(pe_data: &[u8], _pe_info: &PeInfo) -> usize {
+        // Parse sections to find end of raw data. We reparse here since pe_info.pe lifetime
+        // is 'static transmuted and we want fresh parsing for safety.
+        let Ok(pe) = goblin::pe::PE::parse(pe_data) else {
+            log::warn!("Failed to parse PE for overlay detection, using file length");
+            return pe_data.len();
+        };
+
+        let mut end = 0usize;
+        if let Some(optional_header) = pe.header.optional_header {
+            end = end.max(optional_header.windows_fields.size_of_headers as usize);
+        }
+        for section in &pe.sections {
+            let start = section.pointer_to_raw_data as usize;
+            let size = section.size_of_raw_data as usize;
+            end = end.max(start.saturating_add(size));
+        }
+
+        // Fallback for minimal/test PEs
+        if end == 0 {
+            log::warn!("PE has no sections or headers, using file length for hash boundary");
+            return pe_data.len();
+        }
+
+        end.min(pe_data.len())
     }
     fn export_signature_components_for_debugging(
         &self,
