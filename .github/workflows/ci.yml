@@ -88,7 +88,7 @@ jobs:
           file target-docker/x86_64-unknown-linux-musl/release/yubikey-proxy
 
       - name: Upload x86_64-musl artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-x86_64-unknown-linux-musl
           path: |
@@ -190,7 +190,7 @@ jobs:
           done
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-${{ matrix.target }}
           path: |
@@ -226,7 +226,7 @@ jobs:
           file target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy
 
       - name: Upload aarch64 proxy artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: artifact-aarch64-unknown-linux-musl-direct-usb
           path: target-docker/aarch64-unknown-linux-musl/release/yubikey-proxy
@@ -286,7 +286,7 @@ jobs:
           }
 
       - name: Upload signed artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: signed-windows-binary
           path: signed/yubikey-signer-signed.exe
