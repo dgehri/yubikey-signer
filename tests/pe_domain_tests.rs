@@ -322,8 +322,8 @@ fn phase6_embedder_preserves_overlay_at_eof() {
     }
 
     // Use an overlay length that makes the file NOT 8-byte aligned.
-    // The embedder must still sign by appending at EOF without inserting pre-padding, preserving
-    // overlay bytes and offsets (important for WiX Burn bundles).
+    // The embedder adds padding AFTER the overlay to reach 8-byte alignment (Windows requires
+    // WIN_CERTIFICATE to start at an aligned offset). The overlay bytes themselves remain intact.
     let overlay_len = 123;
     let pe = make_pe32_with_one_section_and_overlay(overlay_len);
     let original_len = pe.len();
@@ -351,8 +351,9 @@ fn phase6_embedder_preserves_overlay_at_eof() {
         "expected overlay bytes to be unchanged"
     );
 
-    // The certificate table should start at the original EOF (signature appended), not at
-    // end-of-image.
+    // The certificate table must start at an 8-byte aligned offset.
+    // Padding is added after the overlay to achieve this.
+    let expected_sig_offset = (original_len + 7) & !7; // Round up to 8-byte boundary
     let cert_dir_offset = 0x80 + 24 + 96 + 32;
     let cert_rva = u32::from_le_bytes([
         out[cert_dir_offset],
@@ -360,7 +361,15 @@ fn phase6_embedder_preserves_overlay_at_eof() {
         out[cert_dir_offset + 2],
         out[cert_dir_offset + 3],
     ]) as usize;
-    assert_eq!(cert_rva, original_len, "expected signature appended at EOF");
+    assert_eq!(
+        cert_rva, expected_sig_offset,
+        "expected signature at 8-byte aligned offset after overlay"
+    );
+    assert_eq!(
+        cert_rva % 8,
+        0,
+        "certificate table must start at 8-byte aligned offset"
+    );
 }
 
 #[test]
