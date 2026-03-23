@@ -38,7 +38,7 @@ pkcs7 = "0.4.1"
 spki = "0.7"
 hex = "0.4"
 oid = "0.3"
-rand = { version = "0.9.2", features = ["std", "std_rng"] }
+rand = { version = "0.10.0", features = ["std", "std_rng"] }
 
 # OpenSSL for PKCS#7 Authenticode support (required)
 # Windows: Automatically uses vcpkg OpenSSL (preferred)
