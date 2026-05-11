@@ -196,10 +196,9 @@ Get-AuthenticodeSignature myapp-signed.exe
 
 ## Command Line Interface
 
-The CLI provides four main commands:
+The `yubikey-signer` CLI provides four main commands:
 
 - `sign` - Sign PE executables with YubiKey certificates (local or remote)
-- `proxy` - Run a signing proxy server for remote signing
 - `discover` - Find and analyze certificates on your YubiKey
 - `config` - Manage application configuration
 
@@ -220,23 +219,6 @@ Options:
       --dry-run             Preview signing without making changes
   -v, --verbose             Enable verbose output
   -h, --help                Print help
-```
-
-### Proxy Command
-
-Start a signing proxy server (requires YubiKey connected to the host):
-
-```text
-yubikey-signer proxy [OPTIONS]
-
-Options:
-  -b, --bind <ADDR>   Bind address (default: 127.0.0.1:18443)
-  -v, --verbose       Enable verbose output
-  -h, --help          Print help
-
-Environment:
-  YUBICO_PIN            YubiKey PIN for signing operations
-  YUBIKEY_PROXY_TOKEN   Required authentication token for clients
 ```
 
 ### Discover Command
@@ -299,7 +281,7 @@ Remote signing allows code signing from machines without a directly connected Yu
 3. Start the proxy:
 
    ```bash
-   yubikey-signer proxy --bind 0.0.0.0:18443
+  yubikey-proxy --bind 0.0.0.0:18443
    ```
 
 4. For production, place behind a TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel)
@@ -356,6 +338,11 @@ cargo deny check sources
 Ignored advisories are documented with justification and expiry inside `deny.toml`. Remove or update entries once upstream crates patch vulnerabilities.
 
 CI GitHub Actions workflow runs these checks on pushes, pull requests, and a daily schedule; any new unignored vulnerability or disallowed license will fail the workflow.
+
+## Misc Build instructions
+
+When running `cargo build --release`, only `yubikey-signer` is built. If you also want the proxy, please run `cargo build --release --all-features`  
+When building yubikey-signer on Windows, you might need to install Strawberry Perl in order to be able to build OpenSSL.
 
 ## License
 
