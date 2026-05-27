@@ -13,7 +13,7 @@ fn verify_rejects_invalid_pe() {
 
 #[test]
 fn verify_accepts_minimal_like_pe() {
-    // Construct buffer meeting minimal size threshold (>=4096) with MZ header and fake PE signature
+    // Construct buffer meeting minimal size threshold (>=3072) with MZ header and fake PE signature
     let mut data = vec![0u8; 4096];
     data[0] = b'M';
     data[1] = b'Z';

@@ -28,11 +28,11 @@ pub fn parse_pe(data: &[u8]) -> SigningResult<PeInfo> {
     }
 
     // Conservative validation: extremely small PE files are often malformed in tests
-    // and not suitable for signing/analysis. Require at least 4 KiB.
-    if data.len() < 4096 {
+    // and not suitable for signing/analysis. Require at least 3 KiB.
+    if data.len() < 3072 {
         return Err(SigningError::PeParsingError(
             format!(
-                "Failed to parse PE file: appears too small to be valid for signing ({} bytes, minimum 4096 bytes)",
+                "Failed to parse PE file: appears too small to be valid for signing ({} bytes, minimum 3072 bytes)",
                 data.len()
             )
         ));
@@ -396,5 +396,50 @@ mod tests {
         let mut test_data = vec![0u8; 10];
         let result = update_pe_checksum(&mut test_data, 20); // Offset beyond file
         assert!(result.is_err());
+    }
+
+    /// Files below the 3072-byte minimum must be rejected by [`parse_pe`].
+    #[test]
+    fn test_parse_pe_rejects_below_minimum_size() {
+        // 3071 bytes — one byte under the 3072-byte threshold.
+        let data = vec![0u8; 3071];
+        let result = parse_pe(&data);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("3072"),
+            "Expected error to mention 3072, got: {msg}"
+        );
+    }
+
+    /// A file of exactly 3072 bytes passes the size gate and is rejected for structural
+    /// reasons (not a valid MZ/PE file), *not* for being too small.
+    #[test]
+    fn test_parse_pe_size_gate_passes_at_3072() {
+        // 3072 bytes of zeros — no MZ header, so it should fail on the MZ check, not
+        // on the size check.
+        let data = vec![0u8; 3072];
+        let result = parse_pe(&data);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        // Must NOT be a "too small" error; should mention the MZ / DOS signature instead.
+        assert!(
+            !msg.contains("minimum 3072"),
+            "Should not be rejected for size at 3072 bytes, got: {msg}"
+        );
+    }
+
+    /// Files that were previously rejected (between 3072 and 4095 bytes) now pass the
+    /// size gate.  They will be rejected for structural reasons, not size.
+    #[test]
+    fn test_parse_pe_size_gate_passes_at_4095() {
+        let data = vec![0u8; 4095];
+        let result = parse_pe(&data);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            !msg.contains("minimum 3072"),
+            "4095-byte file should not be rejected for size, got: {msg}"
+        );
     }
 }

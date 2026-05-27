@@ -417,9 +417,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
                 println!("[+] File signed successfully!");
                 if args.verbose {
                     println!("  Duration: {:.2}s", duration.as_secs_f64());
-                    let file_size = std::fs::metadata(&output_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                    let file_size = std::fs::metadata(&output_path).map_or(0, |m| m.len());
                     println!("  File size: {file_size} bytes");
                     println!("  Slot used: {}", config_clone.piv_slot);
                     if let Some(ref ts_url) = config_clone.timestamp_url {

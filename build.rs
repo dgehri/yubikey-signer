@@ -110,8 +110,7 @@ fn try_system_openssl() -> bool {
         if Command::new("pkg-config")
             .args(["--exists", "openssl"])
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
         {
             println!("cargo:warning=Found OpenSSL via pkg-config");
             return true;
@@ -123,8 +122,7 @@ fn try_system_openssl() -> bool {
         if Command::new("pkg-config")
             .args(["--exists", "openssl"])
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
         {
             println!("cargo:warning=Found OpenSSL via pkg-config");
             return true;
@@ -836,8 +834,7 @@ fn setup_unix_openssl(target_dir: &Path) -> Result<(), Box<dyn std::error::Error
     if Command::new("which")
         .arg("make")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
     {
         println!("cargo:warning=Building OpenSSL from source...");
         build_openssl_from_source(target_dir)?;

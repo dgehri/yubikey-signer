@@ -1601,9 +1601,8 @@ fn fat_save(output: &mut Vec<u8>, out: &mut MsiOut) -> SigningResult<()> {
     if difat_sectors > 0 {
         let mut remaining_fat_ids = (fat_sectors as usize).saturating_sub(DIFAT_IN_HEADER);
         let mut next_fat_id = fat_start + u32::try_from(DIFAT_IN_HEADER).unwrap_or(0);
-        let mut difat_sector_index = fat_start + fat_sectors;
 
-        for i in 0..difat_sectors {
+        for (difat_sector_index, i) in (fat_start + fat_sectors..).zip(0..difat_sectors) {
             let mut sector = vec![0u8; out.sector_size];
             for j in 0..difat_entries_per_sector {
                 let sid = if remaining_fat_ids > 0 {
@@ -1625,7 +1624,6 @@ fn fat_save(output: &mut Vec<u8>, out: &mut MsiOut) -> SigningResult<()> {
             };
             sector[out.sector_size - 4..out.sector_size].copy_from_slice(&link.to_le_bytes());
             output.extend_from_slice(&sector);
-            difat_sector_index += 1;
         }
     }
 

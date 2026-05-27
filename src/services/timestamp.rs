@@ -614,7 +614,7 @@ impl TimestampClient {
         if time_str.len() >= 14 && time_str.ends_with('Z') {
             // For simplicity, just return current time with offset
             // In production, would parse the actual timestamp
-            let duration_offset = Duration::from_secs(3600); // 1 hour ago as example
+            let duration_offset = Duration::from_hours(1); // 1 hour ago as example
             SystemTime::now()
                 .checked_sub(duration_offset)
                 .ok_or_else(|| "Failed to calculate timestamp offset".into())
