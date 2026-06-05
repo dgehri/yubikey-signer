@@ -163,6 +163,12 @@ function Test-YubikeySignerSign {
         if ($WithTimestamp) {
             $cmdArgs += "--timestamp"
         }
+        else {
+            # Timestamping is enabled by default via configuration; explicitly disable it
+            # when validating non-timestamped outputs.
+            $cmdArgs += "--timestamp"
+            $cmdArgs += ""
+        }
         if ($Verbose) {
             $cmdArgs += "--verbose"
         }

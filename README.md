@@ -59,10 +59,18 @@ yubikey-signer sign myapp.exe -o signed.exe \
 
 ### Timestamping
 
+Timestamping is enabled by default using the configured primary timestamp server.
+
 With timestamp server:
 
 ```bash
 yubikey-signer sign myapp.exe --timestamp http://timestamp.digicert.com
+```
+
+Use config-managed defaults (primary + fallback servers):
+
+```bash
+yubikey-signer sign myapp.exe
 ```
 
 Without timestamping (not recommended for production):
@@ -214,7 +222,7 @@ Arguments:
 Options:
   -o, --output <FILE>       Output file (default: sign in-place)
   -s, --slot <SLOT>         PIV slot (hex: 0x9c, 9c, or decimal: 156)
-  -t, --timestamp [<URL>]   Timestamp server URL (default: http://ts.ssl.com)
+  -t, --timestamp [<URL>]   Timestamp server URL override (empty string disables timestamping)
   -r, --remote <URL>        Remote signing proxy URL
       --header <HEADER>     Custom HTTP header (format: "Name: Value"), repeatable
       --dry-run             Preview signing without making changes
