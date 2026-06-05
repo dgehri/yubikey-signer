@@ -117,6 +117,8 @@ struct Cli {
     command: Commands,
 }
 
+const TIMESTAMP_USE_CONFIG_SENTINEL: &str = "__USE_CONFIG_DEFAULTS__";
+
 #[derive(Subcommand)]
 enum Commands {
     /// Sign a PE or MSI file
@@ -133,8 +135,8 @@ enum Commands {
         #[arg(short, long, value_name = "SLOT", default_value = "9a")]
         slot: String,
 
-        /// Timestamp server URL (use without value for default server)
-        #[arg(short, long, value_name = "URL", num_args = 0..=1, default_missing_value = "http://ts.ssl.com")]
+        /// Timestamp server URL (omit value to use configuration defaults)
+        #[arg(short, long, value_name = "URL", num_args = 0..=1, default_missing_value = "__USE_CONFIG_DEFAULTS__")]
         timestamp: Option<String>,
 
         /// Remote `YubiKey` proxy URL (e.g., <https://yubikey.example.com>)
@@ -246,6 +248,12 @@ struct SignCommandArgs {
     verbose: bool,
 }
 
+#[derive(Clone)]
+struct TimestampSettings {
+    url: Option<TimestampUrl>,
+    config: Option<TimestampConfig>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -308,6 +316,10 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     let signing_preferences = load_signing_preferences();
     let (resolved_timestamp_url, resolved_timestamp_config, timestamp_source) =
         resolve_timestamp_settings(args.timestamp.as_deref(), &signing_preferences)?;
+    let timestamp_settings = TimestampSettings {
+        url: resolved_timestamp_url.clone(),
+        config: resolved_timestamp_config.clone(),
+    };
 
     // Parse slot
     let piv_slot = parse_piv_slot(&args.slot)
@@ -328,8 +340,7 @@ async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
                 piv_slot,
                 output_path,
                 remote_url,
-                resolved_timestamp_url,
-                resolved_timestamp_config,
+                &timestamp_settings,
             )
             .await;
         }
@@ -818,8 +829,7 @@ async fn handle_remote_sign(
     piv_slot: PivSlot,
     output_path: PathBuf,
     remote_url: &str,
-    timestamp_url: Option<TimestampUrl>,
-    timestamp_config: Option<TimestampConfig>,
+    timestamp_settings: &TimestampSettings,
 ) -> Result<()> {
     // Get proxy authentication token
     let auth_token = std::env::var("YUBIKEY_PROXY_TOKEN")
@@ -900,8 +910,7 @@ async fn handle_remote_sign(
             &cert_der,
             piv_slot,
             &additional_certs,
-            timestamp_url.as_ref(),
-            timestamp_config.as_ref(),
+            timestamp_settings,
             args.verbose,
         )
         .await?
@@ -912,8 +921,7 @@ async fn handle_remote_sign(
             &cert_der,
             piv_slot,
             &additional_certs,
-            timestamp_url.as_ref(),
-            timestamp_config.as_ref(),
+            timestamp_settings,
             args.verbose,
         )
         .await?
@@ -941,8 +949,7 @@ async fn handle_remote_pe_sign(
     cert_der: &[u8],
     piv_slot: PivSlot,
     additional_certs: &[Vec<u8>],
-    timestamp_url: Option<&TimestampUrl>,
-    timestamp_config: Option<&TimestampConfig>,
+    timestamp_settings: &TimestampSettings,
     verbose: bool,
 ) -> Result<Vec<u8>> {
     // Allow re-signing: if the input already contains an Authenticode certificate table,
@@ -981,7 +988,7 @@ async fn handle_remote_pe_sign(
     }
     // Get timestamp if requested
     let timestamp_token =
-        get_timestamp_if_requested(timestamp_url, timestamp_config, verbose, &signature).await?;
+        get_timestamp_if_requested(timestamp_settings, verbose, &signature).await?;
 
     // Create signed PE using preserved context
     let signed_pe = openssl_signer
@@ -1004,8 +1011,7 @@ async fn handle_remote_msi_sign(
     cert_der: &[u8],
     piv_slot: PivSlot,
     additional_certs: &[Vec<u8>],
-    timestamp_url: Option<&TimestampUrl>,
-    timestamp_config: Option<&TimestampConfig>,
+    timestamp_settings: &TimestampSettings,
     verbose: bool,
 ) -> Result<Vec<u8>> {
     // Create MSI signer with remote certificate and additional certs
@@ -1038,7 +1044,7 @@ async fn handle_remote_msi_sign(
 
     // Get timestamp if requested
     let timestamp_token =
-        get_timestamp_if_requested(timestamp_url, timestamp_config, verbose, &signature).await?;
+        get_timestamp_if_requested(timestamp_settings, verbose, &signature).await?;
 
     // Create signed MSI using preserved context
     let signed_msi = msi_signer
@@ -1056,16 +1062,15 @@ async fn handle_remote_msi_sign(
 
 /// Get timestamp token if timestamping is enabled.
 async fn get_timestamp_if_requested(
-    timestamp_url: Option<&TimestampUrl>,
-    timestamp_config: Option<&TimestampConfig>,
+    timestamp_settings: &TimestampSettings,
     verbose: bool,
     signature: &[u8],
 ) -> Result<Option<Vec<u8>>> {
-    if let Some(ts_url) = timestamp_url {
+    if let Some(ts_url) = timestamp_settings.url.as_ref() {
         if verbose {
             println!("[*] Fetching timestamp from {}...", ts_url.as_str());
         }
-        let ts_client = if let Some(ts_cfg) = timestamp_config {
+        let ts_client = if let Some(ts_cfg) = timestamp_settings.config.as_ref() {
             TimestampClient::with_config(ts_cfg.clone())
         } else {
             TimestampClient::new(ts_url)
@@ -1119,6 +1124,7 @@ fn resolve_timestamp_settings(
     prefs: &SigningConfiguration,
 ) -> Result<(Option<TimestampUrl>, Option<TimestampConfig>, &'static str)> {
     match cli_timestamp {
+        Some(raw) if raw == TIMESTAMP_USE_CONFIG_SENTINEL => resolve_timestamp_from_config(prefs),
         Some(raw) if raw.trim().is_empty() => Ok((None, None, "cli-disabled")),
         Some(raw) => {
             let primary = TimestampUrl::new(raw)
@@ -1133,33 +1139,38 @@ fn resolve_timestamp_settings(
             };
             Ok((Some(primary), Some(config), "cli"))
         }
-        None => {
-            let primary = TimestampUrl::new(&prefs.primary_timestamp_server)
-                .into_diagnostic()
-                .context("Invalid primary timestamp server in configuration")?;
-
-            let fallback_servers = prefs
-                .fallback_timestamp_servers
-                .iter()
-                .map(|url| {
-                    TimestampUrl::new(url)
-                        .map_err(miette::Report::from)
-                        .with_context(|| {
-                            format!("Invalid fallback timestamp server in configuration: {url}")
-                        })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let config = TimestampConfig {
-                primary_server: primary.clone(),
-                fallback_servers,
-                timeout: Duration::from_secs(prefs.network_timeout_seconds),
-                retry_attempts: prefs.retry_attempts,
-                retry_delay: Duration::from_secs(2),
-            };
-            Ok((Some(primary), Some(config), "config"))
-        }
+        None => resolve_timestamp_from_config(prefs),
     }
+}
+
+fn resolve_timestamp_from_config(
+    prefs: &SigningConfiguration,
+) -> Result<(Option<TimestampUrl>, Option<TimestampConfig>, &'static str)> {
+    let primary = TimestampUrl::new(&prefs.primary_timestamp_server)
+        .into_diagnostic()
+        .context("Invalid primary timestamp server in configuration")?;
+
+    let fallback_servers = prefs
+        .fallback_timestamp_servers
+        .iter()
+        .map(|url| {
+            TimestampUrl::new(url)
+                .map_err(miette::Report::from)
+                .with_context(|| {
+                    format!("Invalid fallback timestamp server in configuration: {url}")
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let config = TimestampConfig {
+        primary_server: primary.clone(),
+        fallback_servers,
+        timeout: Duration::from_secs(prefs.network_timeout_seconds),
+        retry_attempts: prefs.retry_attempts,
+        retry_delay: Duration::from_secs(2),
+    };
+
+    Ok((Some(primary), Some(config), "config"))
 }
 
 #[cfg(test)]
@@ -1201,5 +1212,21 @@ mod tests {
         assert_eq!(source, "cli-disabled");
         assert!(url.is_none());
         assert!(config.is_none());
+    }
+
+    #[test]
+    fn resolve_timestamp_settings_cli_flag_without_value_uses_config() {
+        let prefs = SigningConfiguration::default();
+        let (url, config, source) =
+            resolve_timestamp_settings(Some(TIMESTAMP_USE_CONFIG_SENTINEL), &prefs).unwrap();
+        assert_eq!(source, "config");
+        assert_eq!(
+            url.as_ref().map(TimestampUrl::as_str),
+            Some(prefs.primary_timestamp_server.as_str())
+        );
+        assert_eq!(
+            config.as_ref().map(|c| c.fallback_servers.len()),
+            Some(prefs.fallback_timestamp_servers.len())
+        );
     }
 }

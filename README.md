@@ -222,7 +222,7 @@ Arguments:
 Options:
   -o, --output <FILE>       Output file (default: sign in-place)
   -s, --slot <SLOT>         PIV slot (hex: 0x9c, 9c, or decimal: 156)
-  -t, --timestamp [<URL>]   Timestamp server URL override (empty string disables timestamping)
+  -t, --timestamp [<URL>]   Timestamp URL override (omit value to use config defaults; empty string disables)
   -r, --remote <URL>        Remote signing proxy URL
       --header <HEADER>     Custom HTTP header (format: "Name: Value"), repeatable
       --dry-run             Preview signing without making changes
