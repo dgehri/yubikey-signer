@@ -50,7 +50,7 @@ openssl-sys = "0.9"
 goblin = "0.10.4"
 
 # MSI (OLE Compound File) manipulation
-cfb = "0.12"
+cfb = "0.14"
 
 # HTTP client for timestamping
 reqwest = { version = "0.12.23", features = ["rustls-tls", "json"] }
