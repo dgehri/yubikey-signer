@@ -197,6 +197,7 @@ jobs:
             target/${{ matrix.target }}/release/yubikey-signer${{ matrix.binary-suffix }}
             target/${{ matrix.target }}/release/yubikey-proxy${{ matrix.binary-suffix }}
           if-no-files-found: error
+          overwrite: true
 
   # Cross-compile yubikey-proxy for ASUS routers and similar aarch64 embedded devices
   # Uses Docker-based build to match the Dockerfile.aarch64-direct-usb setup
