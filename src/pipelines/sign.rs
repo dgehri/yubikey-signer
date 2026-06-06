@@ -10,6 +10,7 @@ use crate::{
         attr_builder::AttrBuilderService, authenticode::OpenSslAuthenticodeSigner,
         embedder::PeSignatureEmbedderService, pe_hasher::PeHasher,
         pkcs7_builder::Pkcs7BuilderService, spc_builder::SpcBuilderService,
+        timestamp::TimestampConfig,
     },
     SigningConfig,
     SigningError,
@@ -20,12 +21,28 @@ use std::path::Path;
 
 pub struct SignWorkflow {
     hash_algorithm: HashAlgorithm,
+    timestamp_config: Option<TimestampConfig>,
 }
 
 impl SignWorkflow {
     #[must_use]
     pub fn new(hash_algorithm: HashAlgorithm) -> Self {
-        Self { hash_algorithm }
+        Self {
+            hash_algorithm,
+            timestamp_config: None,
+        }
+    }
+
+    /// Create a workflow that uses the provided timestamp configuration.
+    #[must_use]
+    pub fn new_with_timestamp_config(
+        hash_algorithm: HashAlgorithm,
+        timestamp_config: Option<TimestampConfig>,
+    ) -> Self {
+        Self {
+            hash_algorithm,
+            timestamp_config,
+        }
     }
 
     #[must_use]
@@ -105,9 +122,17 @@ impl SignWorkflow {
             log::info!("Using authenticode path for timestamped signing");
 
             // Get timestamp token first
-            use crate::services::timestamp::{TimestampClient, TimestampConfig};
-            let ts_config = TimestampConfig::default();
-            let timestamp_client = TimestampClient::with_config(ts_config);
+            use crate::services::timestamp::TimestampClient;
+            let timestamp_client = if let Some(ts_config) = self.timestamp_config.clone() {
+                TimestampClient::with_config(ts_config)
+            } else {
+                let ts_url = config.timestamp_url.as_ref().ok_or_else(|| {
+                    SigningError::TimestampError(
+                        "Timestamping requested but no timestamp server is configured".to_string(),
+                    )
+                })?;
+                TimestampClient::new(ts_url)
+            };
             let timestamp_token = timestamp_client.get_timestamp(&signature).await?;
 
             let authenticode_signer =
@@ -150,6 +175,15 @@ mod tests {
     fn construct_workflow() {
         let wf = SignWorkflow::new(HashAlgorithm::Sha256);
         assert!(matches!(wf.hash_algorithm, HashAlgorithm::Sha256));
+        assert!(wf.timestamp_config.is_none());
+    }
+
+    #[test]
+    fn construct_workflow_with_timestamp_config() {
+        let ts_config = TimestampConfig::default();
+        let wf = SignWorkflow::new_with_timestamp_config(HashAlgorithm::Sha256, Some(ts_config));
+        assert!(matches!(wf.hash_algorithm, HashAlgorithm::Sha256));
+        assert!(wf.timestamp_config.is_some());
     }
 
     // Integration tests with hardware are in tests/ directory
