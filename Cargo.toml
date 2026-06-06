@@ -31,7 +31,7 @@ yubikey = { version = "0.8", optional = true }
 # Cryptographic operations  
 sha2 = "0.10"
 x509-cert = "0.2"
-der = "0.7"
+der = "0.8"
 pem = "3.0"
 pkcs1 = "0.7"
 pkcs7 = "0.4.1"
