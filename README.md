@@ -76,7 +76,7 @@ yubikey-signer sign myapp.exe
 Without timestamping (not recommended for production):
 
 ```bash
-yubikey-signer sign myapp.exe --timestamp ""
+yubikey-signer sign myapp.exe --no-timestamp
 ```
 
 ### PIV Slot Selection
@@ -222,7 +222,8 @@ Arguments:
 Options:
   -o, --output <FILE>       Output file (default: sign in-place)
   -s, --slot <SLOT>         PIV slot (hex: 0x9c, 9c, or decimal: 156)
-  -t, --timestamp [<URL>]   Timestamp URL override (omit value to use config defaults; empty string disables)
+  -t, --timestamp <URL>     Timestamp server URL override (absent = use configured defaults)
+      --no-timestamp        Disable timestamping explicitly
   -r, --remote <URL>        Remote signing proxy URL
       --header <HEADER>     Custom HTTP header (format: "Name: Value"), repeatable
       --dry-run             Preview signing without making changes

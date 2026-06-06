@@ -117,8 +117,6 @@ struct Cli {
     command: Commands,
 }
 
-const TIMESTAMP_USE_CONFIG_SENTINEL: &str = "__USE_CONFIG_DEFAULTS__";
-
 #[derive(Subcommand)]
 enum Commands {
     /// Sign a PE or MSI file
@@ -135,9 +133,13 @@ enum Commands {
         #[arg(short, long, value_name = "SLOT", default_value = "9a")]
         slot: String,
 
-        /// Timestamp server URL (omit value to use configuration defaults)
-        #[arg(short, long, value_name = "URL", num_args = 0..=1, default_missing_value = "__USE_CONFIG_DEFAULTS__")]
+        /// Timestamp server URL override (when absent, configured defaults apply)
+        #[arg(short, long, value_name = "URL")]
         timestamp: Option<String>,
+
+        /// Explicitly disable timestamping (overrides configuration defaults)
+        #[arg(long, conflicts_with = "timestamp")]
+        no_timestamp: bool,
 
         /// Remote `YubiKey` proxy URL (e.g., <https://yubikey.example.com>)
         #[arg(long, value_name = "URL", env = "YUBIKEY_PROXY_URL")]
@@ -241,6 +243,7 @@ struct SignCommandArgs {
     output: Option<PathBuf>,
     slot: String,
     timestamp: Option<String>,
+    no_timestamp: bool,
     remote: Option<String>,
     headers: Vec<String>,
     additional_certs: Vec<PathBuf>,
@@ -279,6 +282,7 @@ async fn main() -> Result<()> {
             output,
             slot,
             timestamp,
+            no_timestamp,
             remote,
             headers,
             additional_certs,
@@ -290,6 +294,7 @@ async fn main() -> Result<()> {
                 output,
                 slot,
                 timestamp,
+                no_timestamp,
                 remote,
                 headers,
                 additional_certs,
@@ -315,7 +320,11 @@ async fn main() -> Result<()> {
 async fn handle_sign_command(args: SignCommandArgs) -> Result<()> {
     let signing_preferences = load_signing_preferences();
     let (resolved_timestamp_url, resolved_timestamp_config, timestamp_source) =
-        resolve_timestamp_settings(args.timestamp.as_deref(), &signing_preferences)?;
+        resolve_timestamp_settings(
+            args.timestamp.as_deref(),
+            args.no_timestamp,
+            &signing_preferences,
+        )?;
     let timestamp_settings = TimestampSettings {
         url: resolved_timestamp_url.clone(),
         config: resolved_timestamp_config.clone(),
@@ -1101,13 +1110,14 @@ fn load_signing_preferences() -> SigningConfiguration {
 /// Resolve effective timestamp settings using CLI overrides and persisted configuration.
 ///
 /// Precedence rules:
-/// - `--timestamp ""` disables timestamping
-/// - `--timestamp <URL>` enables timestamping with explicit URL as primary and no fallbacks
-/// - no CLI timestamp flag uses configuration primary/fallback servers
+/// - `--no-timestamp` disables timestamping
+/// - `--timestamp <URL>` enables timestamping with the given URL as primary (no fallbacks)
+/// - neither flag present uses configuration primary/fallback servers
 ///
 /// # Arguments
 ///
-/// * `cli_timestamp` - Optional CLI timestamp value from `--timestamp`
+/// * `cli_timestamp` - Optional explicit URL from `--timestamp <URL>`
+/// * `no_timestamp` - Whether `--no-timestamp` was passed
 /// * `prefs` - Loaded signing preferences containing timestamp defaults
 ///
 /// # Returns
@@ -1121,13 +1131,16 @@ fn load_signing_preferences() -> SigningConfiguration {
 /// Returns an error when the CLI or persisted timestamp URLs are invalid.
 fn resolve_timestamp_settings(
     cli_timestamp: Option<&str>,
+    no_timestamp: bool,
     prefs: &SigningConfiguration,
 ) -> Result<(Option<TimestampUrl>, Option<TimestampConfig>, &'static str)> {
+    if no_timestamp {
+        return Ok((None, None, "cli-disabled"));
+    }
     match cli_timestamp {
-        Some(raw) if raw == TIMESTAMP_USE_CONFIG_SENTINEL => resolve_timestamp_from_config(prefs),
-        Some(raw) if raw.trim().is_empty() => Ok((None, None, "cli-disabled")),
         Some(raw) => {
-            let primary = TimestampUrl::new(raw)
+            let trimmed = raw.trim();
+            let primary = TimestampUrl::new(trimmed)
                 .into_diagnostic()
                 .context("Invalid --timestamp URL")?;
             let config = TimestampConfig {
@@ -1180,7 +1193,7 @@ mod tests {
     #[test]
     fn resolve_timestamp_settings_uses_config_when_cli_missing() {
         let prefs = SigningConfiguration::default();
-        let (url, config, source) = resolve_timestamp_settings(None, &prefs).unwrap();
+        let (url, config, source) = resolve_timestamp_settings(None, false, &prefs).unwrap();
         assert_eq!(source, "config");
         assert_eq!(
             url.as_ref().map(TimestampUrl::as_str),
@@ -1196,7 +1209,8 @@ mod tests {
     fn resolve_timestamp_settings_uses_cli_override_without_fallbacks() {
         let prefs = SigningConfiguration::default();
         let (url, config, source) =
-            resolve_timestamp_settings(Some("http://timestamp.digicert.com"), &prefs).unwrap();
+            resolve_timestamp_settings(Some("http://timestamp.digicert.com"), false, &prefs)
+                .unwrap();
         assert_eq!(source, "cli");
         assert_eq!(
             url.as_ref().map(TimestampUrl::as_str),
@@ -1206,27 +1220,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_timestamp_settings_allows_explicit_disable() {
+    fn resolve_timestamp_settings_no_timestamp_flag_disables() {
         let prefs = SigningConfiguration::default();
-        let (url, config, source) = resolve_timestamp_settings(Some(""), &prefs).unwrap();
+        let (url, config, source) = resolve_timestamp_settings(None, true, &prefs).unwrap();
         assert_eq!(source, "cli-disabled");
         assert!(url.is_none());
         assert!(config.is_none());
     }
 
     #[test]
-    fn resolve_timestamp_settings_cli_flag_without_value_uses_config() {
+    fn resolve_timestamp_settings_trims_whitespace_from_url() {
         let prefs = SigningConfiguration::default();
-        let (url, config, source) =
-            resolve_timestamp_settings(Some(TIMESTAMP_USE_CONFIG_SENTINEL), &prefs).unwrap();
-        assert_eq!(source, "config");
+        let (url, _, source) =
+            resolve_timestamp_settings(Some("  http://timestamp.digicert.com  "), false, &prefs)
+                .unwrap();
+        assert_eq!(source, "cli");
         assert_eq!(
             url.as_ref().map(TimestampUrl::as_str),
-            Some(prefs.primary_timestamp_server.as_str())
-        );
-        assert_eq!(
-            config.as_ref().map(|c| c.fallback_servers.len()),
-            Some(prefs.fallback_timestamp_servers.len())
+            Some("http://timestamp.digicert.com")
         );
     }
 }

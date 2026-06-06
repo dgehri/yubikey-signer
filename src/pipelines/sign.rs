@@ -126,10 +126,11 @@ impl SignWorkflow {
             let timestamp_client = if let Some(ts_config) = self.timestamp_config.clone() {
                 TimestampClient::with_config(ts_config)
             } else {
-                let ts_url = config
-                    .timestamp_url
-                    .as_ref()
-                    .expect("timestamp_url must be present when want_timestamp is true");
+                let ts_url = config.timestamp_url.as_ref().ok_or_else(|| {
+                    SigningError::TimestampError(
+                        "Timestamping requested but no timestamp server is configured".to_string(),
+                    )
+                })?;
                 TimestampClient::new(ts_url)
             };
             let timestamp_token = timestamp_client.get_timestamp(&signature).await?;
