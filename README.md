@@ -48,14 +48,31 @@ export YUBIKEY_PROXY_TOKEN="your-secret-token"
 yubikey-signer sign myapp.exe -o signed.exe --remote http://proxy:18443
 ```
 
-With custom HTTP headers (for reverse proxies like Cloudflare Access):
+Behind Cloudflare Access, pass the service token through the environment:
+
+```bash
+export YUBIKEY_CF_CLIENT_ID="your-client-id.access"
+export YUBIKEY_CF_CLIENT_SECRET="your-client-secret"
+yubikey-signer sign myapp.exe -o signed.exe --remote https://sign.example.com
+```
+
+The signer sends them as `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
+Each variable takes the bare value or the full `Header-Name: value` form, and an
+empty variable is ignored. Use the environment rather than `--header` for
+credentials: command-line arguments are visible to every user on the machine
+in the process list.
+
+Other HTTP headers go on the command line with `--header`, which can be
+repeated:
 
 ```bash
 yubikey-signer sign myapp.exe -o signed.exe \
   --remote https://sign.example.com \
-  --header "CF-Access-Client-Id: your-client-id.access" \
-  --header "CF-Access-Client-Secret: your-client-secret"
+  --header "X-Request-Source: build-server"
 ```
+
+A `--header` with the same name as an environment-supplied header takes
+precedence over the environment variable.
 
 ### Timestamping
 
@@ -135,6 +152,15 @@ $env:YUBICO_PIN = "123456"  # Windows PowerShell
 ```bash
 export YUBIKEY_PROXY_TOKEN="your-secret-token"  # Linux/macOS
 $env:YUBIKEY_PROXY_TOKEN = "your-secret-token"  # Windows PowerShell
+```
+
+**Cloudflare Access** - Set the service token used on remote requests:
+
+```bash
+export YUBIKEY_CF_CLIENT_ID="your-client-id.access"      # Linux/macOS
+export YUBIKEY_CF_CLIENT_SECRET="your-client-secret"
+$env:YUBIKEY_CF_CLIENT_ID = "your-client-id.access"      # Windows PowerShell
+$env:YUBIKEY_CF_CLIENT_SECRET = "your-client-secret"
 ```
 
 ## Installation
@@ -224,7 +250,8 @@ Options:
   -t, --timestamp <URL>     Timestamp server URL override (absent = use configured defaults)
       --no-timestamp        Disable timestamping explicitly
   -r, --remote <URL>        Remote signing proxy URL
-      --header <HEADER>     Custom HTTP header (format: "Name: Value"), repeatable
+      --header <HEADER>     Custom HTTP header (format: "Name: Value"), repeatable;
+                            overrides YUBIKEY_CF_CLIENT_ID/SECRET of the same name
       --dry-run             Preview signing without making changes
   -v, --verbose             Enable verbose output
   -h, --help                Print help
