@@ -450,7 +450,10 @@ mod tests {
         let config = SigningConfiguration::default();
         assert_eq!(config.default_piv_slot, 0x9a);
         assert_eq!(config.default_hash_algorithm, "sha384");
-        assert!(!config.fallback_timestamp_servers.is_empty());
+        assert!(
+            !config.fallback_timestamp_servers.is_empty(),
+            "no fallback timestamp servers configured"
+        );
     }
 
     #[test]

@@ -202,7 +202,7 @@ mod hardware_tests {
         match ops.sign_hash(&test_hash, slot) {
             Ok(signature) => {
                 println!("✅ Signing successful: {} bytes", signature.len());
-                assert!(!signature.is_empty());
+                assert!(!signature.is_empty(), "signature is empty");
             }
             Err(e) => {
                 println!("ℹ️  Signing failed: {e}");

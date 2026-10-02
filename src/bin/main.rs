@@ -1423,14 +1423,20 @@ mod tests {
             ]),
         );
         assert_eq!(headers, vec![pair("X-Other", "1")]);
-        assert!(from_env.is_empty());
+        assert!(
+            from_env.is_empty(),
+            "no header should come from the environment"
+        );
     }
 
     #[test]
     fn merge_env_headers_without_variables_leaves_headers_unchanged() {
         let (headers, from_env) = merge_env_headers(vec![pair("X-Other", "1")], env_of(&[]));
         assert_eq!(headers, vec![pair("X-Other", "1")]);
-        assert!(from_env.is_empty());
+        assert!(
+            from_env.is_empty(),
+            "no header should come from the environment"
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ fn timestamp_workflow_basic_request_and_token() {
         .build_request(&signature_bytes, HashAlgorithm::Sha256)
         .expect("should build request");
 
-    assert!(!request.is_empty());
+    assert!(!request.is_empty(), "timestamp request is empty");
     assert_eq!(request[0], 0x30); // Should be DER SEQUENCE
 
     // Simulate receiving a timestamp token (minimal valid structure)
@@ -131,7 +131,10 @@ fn phase7_timestamp_workflow_integration() {
         .expect("should apply timestamp");
 
     // Verify the result
-    assert!(!timestamped_pkcs7.as_der().is_empty());
+    assert!(
+        !timestamped_pkcs7.as_der().is_empty(),
+        "timestamped PKCS#7 is empty"
+    );
     assert!(!timestamped_pkcs7.is_empty());
 }
 
