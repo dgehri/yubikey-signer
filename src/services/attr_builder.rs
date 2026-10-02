@@ -63,7 +63,7 @@ mod tests {
         let out = service.build(&digest, &spc, &[], &[]).expect("attr build");
         assert!(out.set_der.starts_with(&[0x31]));
         assert!(out.embedding_der.starts_with(&[0xA0]));
-        assert!(!out.set_der.is_empty());
-        assert!(!out.embedding_der.is_empty());
+        assert!(!out.set_der.is_empty(), "SET encoding is empty");
+        assert!(!out.embedding_der.is_empty(), "embedding encoding is empty");
     }
 }

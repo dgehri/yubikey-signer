@@ -355,7 +355,7 @@ mod error_handling_tests {
         println!("Error message: {error_msg}");
 
         // Should contain relevant context
-        assert!(!error_msg.is_empty());
+        assert!(!error_msg.is_empty(), "error message is empty");
     }
 
     #[test]

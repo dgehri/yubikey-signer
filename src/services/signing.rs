@@ -226,9 +226,8 @@ impl Signer {
                 p.set_message("Validating certificate");
             }
 
-            let _certificate_analysis = self
-                .validate_and_auto_detect(&mut yubikey_ops, &mut actual_slot, &mut warnings)
-                .await?;
+            let _certificate_analysis =
+                self.validate_and_auto_detect(&mut yubikey_ops, &mut actual_slot, &mut warnings)?;
 
             if self.options.verbose && !warnings.is_empty() {
                 log::warn!("Certificate validation warnings:");
@@ -353,7 +352,7 @@ impl Signer {
     }
 
     /// Validate certificate and perform auto-detection if needed
-    async fn validate_and_auto_detect(
+    fn validate_and_auto_detect(
         &self,
         yubikey_ops: &mut YubiKeyOperations,
         actual_slot: &mut PivSlot,

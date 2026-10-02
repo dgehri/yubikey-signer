@@ -781,7 +781,10 @@ mod tests {
     fn test_timestamp_config_default() {
         let config = TimestampConfig::default();
         assert_eq!(config.primary_server.as_str(), "http://ts.ssl.com");
-        assert!(!config.fallback_servers.is_empty());
+        assert!(
+            !config.fallback_servers.is_empty(),
+            "no fallback timestamp servers configured"
+        );
         assert!(config.timeout.as_secs() > 0);
     }
 
@@ -813,7 +816,7 @@ mod tests {
         let results = client.test_server_connectivity().await;
 
         // At least one server should be reachable
-        assert!(!results.is_empty());
+        assert!(!results.is_empty(), "no results returned");
         println!("Connectivity test results:");
         for (server, reachable, error) in results {
             println!(

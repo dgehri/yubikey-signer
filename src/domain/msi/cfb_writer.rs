@@ -560,7 +560,7 @@ fn read_fat(
     let mut fat = Vec::new();
     for &sid in fat_sector_ids {
         let sec = read_sector(msi_data, sector_size, sid)?;
-        for chunk in sec.chunks_exact(4) {
+        for chunk in sec.as_chunks::<4>().0 {
             fat.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
         }
     }
@@ -606,7 +606,9 @@ fn read_ministream_and_minifat(
                 msi_data,
             )?;
             minifat_bytes
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect()
         };
@@ -622,7 +624,7 @@ fn parse_directory_entries(dir_bytes: &[u8]) -> SigningResult<Vec<DirEntry>> {
     }
 
     let mut entries = Vec::new();
-    for (i, chunk) in dir_bytes.chunks_exact(DIRENT_SIZE).enumerate() {
+    for (i, chunk) in dir_bytes.as_chunks::<DIRENT_SIZE>().0.iter().enumerate() {
         let name_len_bytes =
             u16::from_le_bytes([chunk[DIRENT_NAME_LEN], chunk[DIRENT_NAME_LEN + 1]]);
         let object_type = chunk[DIRENT_TYPE];

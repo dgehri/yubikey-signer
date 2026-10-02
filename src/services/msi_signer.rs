@@ -137,7 +137,7 @@ impl MsiSigner {
             "Computed MSI hash: {} bytes, extended: {}, hash: {:02x?}",
             msi_hash.len(),
             msi_ex_hash.is_some(),
-            &msi_hash
+            msi_hash
         );
 
         // Build SPC indirect data
@@ -154,7 +154,7 @@ impl MsiSigner {
             "Computed TBS hash for MSI: {} bytes (MSI hash was {} bytes), TBS: {:02x?}",
             tbs_hash.len(),
             msi_hash.len(),
-            &tbs_hash
+            tbs_hash
         );
         log::debug!(
             "set_der: {} bytes, first 30: {:02x?}",
@@ -375,7 +375,7 @@ impl MsiSigner {
                     let mut hasher = sha2::Sha256::new();
                     hasher.update(contents);
                     let digest = hasher.finalize().to_vec();
-                    log::debug!("messageDigest: {:02x?}", &digest);
+                    log::debug!("messageDigest: {digest:02x?}");
                     digest
                 }
                 HashAlgorithm::Sha384 => {

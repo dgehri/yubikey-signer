@@ -192,7 +192,7 @@ mod integration_tests {
         match result {
             Ok(token) => {
                 println!("✅ Received timestamp token: {} bytes", token.len());
-                assert!(!token.is_empty());
+                assert!(!token.is_empty(), "timestamp token is empty");
                 assert!(token.len() > 100); // Real timestamp tokens should be substantial
             }
             Err(e) => {

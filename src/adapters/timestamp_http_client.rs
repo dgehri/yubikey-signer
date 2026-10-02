@@ -130,6 +130,6 @@ mod tests {
     fn config_servers_list() {
         let base = crate::services::timestamp::TimestampConfig::default();
         let cfg = TimestampHttpConfig::from(&base);
-        assert!(!cfg.servers().is_empty());
+        assert!(!cfg.servers().is_empty(), "no timestamp servers configured");
     }
 }

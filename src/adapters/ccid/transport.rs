@@ -263,7 +263,7 @@ impl CcidTransport {
         // Copy APDU data
         cmd[CCID_HEADER_SIZE..].copy_from_slice(apdu);
 
-        log::trace!("CCID TX: {:02x?}", &cmd);
+        log::trace!("CCID TX: {cmd:02x?}");
 
         self.send_raw(&cmd)?;
         self.receive_response()

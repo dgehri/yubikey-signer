@@ -54,7 +54,7 @@ fn test_pkcs7_structure_with_authenticated_attributes() {
     println!("Created signed PE: {} bytes", signed_pe_data.len());
 
     // The test passes if we reach here without panicking
-    assert!(!signed_pe_data.is_empty());
+    assert!(!signed_pe_data.is_empty(), "signed PE data is empty");
     assert!(signed_pe_data.len() > dummy_pe_data.len()); // Should be larger due to signature
 }
 

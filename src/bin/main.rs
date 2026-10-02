@@ -108,8 +108,16 @@ REMOTE SIGNING:
     Set YUBIKEY_PROXY_TOKEN env var for authentication.
 
 ENVIRONMENT VARIABLES:
-    YUBICO_PIN          YubiKey PIN (required for local signing)
-    YUBIKEY_PROXY_TOKEN Authentication token for remote proxy
+    YUBICO_PIN               YubiKey PIN (required for local signing)
+    YUBIKEY_PROXY_TOKEN      Authentication token for remote proxy
+    YUBIKEY_PROXY_URL        Remote proxy URL (same as --remote)
+    YUBIKEY_CF_CLIENT_ID     Sent as CF-Access-Client-Id on remote requests
+    YUBIKEY_CF_CLIENT_SECRET Sent as CF-Access-Client-Secret on remote requests
+
+    The two YUBIKEY_CF_* variables take the bare value or the full
+    'Header-Name: value' form. Prefer them to --header for credentials, which
+    would otherwise be visible in the process list. A --header of the same
+    name takes precedence.
 ")]
 #[command(version)]
 struct Cli {
@@ -747,6 +755,71 @@ fn parse_piv_slot(slot_str: &str) -> Result<PivSlot, SigningError> {
     PivSlot::new(slot_value)
 }
 
+/// Environment variables that supply Cloudflare Access service-token headers,
+/// paired with the header each one is sent as.
+///
+/// Reading these from the environment keeps the credentials out of the
+/// signer's command line, where any user on the machine can read them from
+/// the process list.
+const ENV_HEADERS: [(&str, &str); 2] = [
+    ("YUBIKEY_CF_CLIENT_ID", "CF-Access-Client-Id"),
+    ("YUBIKEY_CF_CLIENT_SECRET", "CF-Access-Client-Secret"),
+];
+
+/// Interpret the value of a header-carrying environment variable.
+///
+/// Accepts either the bare value or the full `Header-Name: value` form, where
+/// the header name is matched case-insensitively. Returns `None` when the
+/// variable is unset, empty, or carries only the header name.
+fn header_from_env_value(header_name: &str, raw: Option<&str>) -> Option<(String, String)> {
+    let raw = raw?.trim();
+    let value = match raw.split_once(':') {
+        Some((name, value)) if name.trim().eq_ignore_ascii_case(header_name) => value.trim(),
+        _ => raw,
+    };
+    if value.is_empty() {
+        None
+    } else {
+        Some((header_name.to_string(), value.to_string()))
+    }
+}
+
+/// Add the Cloudflare Access headers supplied through the environment.
+///
+/// A header given explicitly with `--header` takes precedence: an environment
+/// variable is ignored when a command-line header of the same name (compared
+/// case-insensitively) is already present.
+///
+/// # Arguments
+/// * `headers` - Headers parsed from the command line
+/// * `lookup` - Environment lookup, injectable so tests need not touch the
+///   process environment
+///
+/// # Returns
+/// The combined headers, and the names of those taken from the environment.
+fn merge_env_headers<F>(
+    mut headers: Vec<(String, String)>,
+    lookup: F,
+) -> (Vec<(String, String)>, Vec<&'static str>)
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut from_env = Vec::new();
+    for (env_var, header_name) in ENV_HEADERS {
+        if headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(header_name))
+        {
+            continue;
+        }
+        if let Some(header) = header_from_env_value(header_name, lookup(env_var).as_deref()) {
+            headers.push(header);
+            from_env.push(header_name);
+        }
+    }
+    (headers, from_env)
+}
+
 /// Parse HTTP headers from command-line arguments.
 ///
 /// Expected format: "Header-Name: value" or "Header-Name:value"
@@ -847,8 +920,12 @@ async fn handle_remote_sign(
             "YUBIKEY_PROXY_TOKEN environment variable not set (required for remote signing)",
         )?;
 
-    // Parse extra headers (format: "Header-Name: value")
-    let extra_headers = parse_headers(&args.headers)?;
+    // Parse extra headers (format: "Header-Name: value"), then add the
+    // Cloudflare Access headers supplied through the environment.
+    let (extra_headers, env_header_names) =
+        merge_env_headers(parse_headers(&args.headers)?, |name| {
+            std::env::var(name).ok()
+        });
 
     // Load additional certificates if provided
     let additional_certs = load_additional_certs(&args.additional_certs)?;
@@ -870,6 +947,13 @@ async fn handle_remote_sign(
         println!("  PIV slot: {piv_slot}");
         if !extra_headers.is_empty() {
             println!("  Custom headers: {}", extra_headers.len());
+        }
+        if !env_header_names.is_empty() {
+            // Names only: the values are credentials.
+            println!(
+                "  Headers from environment: {}",
+                env_header_names.join(", ")
+            );
         }
         if !additional_certs.is_empty() {
             println!("  Additional certificates: {}", additional_certs.len());
@@ -1226,6 +1310,152 @@ mod tests {
         assert_eq!(source, "cli-disabled");
         assert!(url.is_none());
         assert!(config.is_none());
+    }
+
+    fn env_of(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    }
+
+    fn pair(name: &str, value: &str) -> (String, String) {
+        (name.to_string(), value.to_string())
+    }
+
+    #[test]
+    fn header_from_env_value_accepts_bare_value() {
+        assert_eq!(
+            header_from_env_value("CF-Access-Client-Id", Some("abc.access")),
+            Some(pair("CF-Access-Client-Id", "abc.access"))
+        );
+    }
+
+    #[test]
+    fn header_from_env_value_accepts_full_header_form() {
+        assert_eq!(
+            header_from_env_value(
+                "CF-Access-Client-Id",
+                Some("CF-Access-Client-Id: abc.access")
+            ),
+            Some(pair("CF-Access-Client-Id", "abc.access"))
+        );
+        assert_eq!(
+            header_from_env_value(
+                "CF-Access-Client-Secret",
+                Some("CF-Access-Client-Secret:s3cr3t")
+            ),
+            Some(pair("CF-Access-Client-Secret", "s3cr3t"))
+        );
+    }
+
+    #[test]
+    fn header_from_env_value_matches_header_name_case_insensitively() {
+        assert_eq!(
+            header_from_env_value("CF-Access-Client-Id", Some("cf-access-client-id: abc")),
+            Some(pair("CF-Access-Client-Id", "abc"))
+        );
+    }
+
+    #[test]
+    fn header_from_env_value_keeps_colons_in_bare_value() {
+        // A value that merely contains a colon is not a header line.
+        assert_eq!(
+            header_from_env_value("CF-Access-Client-Secret", Some("abc:def")),
+            Some(pair("CF-Access-Client-Secret", "abc:def"))
+        );
+        assert_eq!(
+            header_from_env_value(
+                "CF-Access-Client-Secret",
+                Some("CF-Access-Client-Secret: a:b")
+            ),
+            Some(pair("CF-Access-Client-Secret", "a:b"))
+        );
+    }
+
+    #[test]
+    fn header_from_env_value_ignores_unset_and_empty() {
+        assert_eq!(header_from_env_value("CF-Access-Client-Id", None), None);
+        assert_eq!(header_from_env_value("CF-Access-Client-Id", Some("")), None);
+        assert_eq!(
+            header_from_env_value("CF-Access-Client-Id", Some("   ")),
+            None
+        );
+        assert_eq!(
+            header_from_env_value("CF-Access-Client-Id", Some("CF-Access-Client-Id:  ")),
+            None
+        );
+    }
+
+    #[test]
+    fn merge_env_headers_adds_both_cloudflare_headers() {
+        let (headers, from_env) = merge_env_headers(
+            Vec::new(),
+            env_of(&[
+                ("YUBIKEY_CF_CLIENT_ID", "id.access"),
+                (
+                    "YUBIKEY_CF_CLIENT_SECRET",
+                    "CF-Access-Client-Secret: secret",
+                ),
+            ]),
+        );
+        assert_eq!(
+            headers,
+            vec![
+                pair("CF-Access-Client-Id", "id.access"),
+                pair("CF-Access-Client-Secret", "secret"),
+            ]
+        );
+        assert_eq!(
+            from_env,
+            vec!["CF-Access-Client-Id", "CF-Access-Client-Secret"]
+        );
+    }
+
+    #[test]
+    fn merge_env_headers_ignores_empty_variables() {
+        let (headers, from_env) = merge_env_headers(
+            vec![pair("X-Other", "1")],
+            env_of(&[
+                ("YUBIKEY_CF_CLIENT_ID", ""),
+                ("YUBIKEY_CF_CLIENT_SECRET", "  "),
+            ]),
+        );
+        assert_eq!(headers, vec![pair("X-Other", "1")]);
+        assert!(
+            from_env.is_empty(),
+            "no header should come from the environment"
+        );
+    }
+
+    #[test]
+    fn merge_env_headers_without_variables_leaves_headers_unchanged() {
+        let (headers, from_env) = merge_env_headers(vec![pair("X-Other", "1")], env_of(&[]));
+        assert_eq!(headers, vec![pair("X-Other", "1")]);
+        assert!(
+            from_env.is_empty(),
+            "no header should come from the environment"
+        );
+    }
+
+    #[test]
+    fn merge_env_headers_command_line_takes_precedence() {
+        let (headers, from_env) = merge_env_headers(
+            vec![pair("cf-access-client-id", "from-cli")],
+            env_of(&[
+                ("YUBIKEY_CF_CLIENT_ID", "from-env"),
+                ("YUBIKEY_CF_CLIENT_SECRET", "secret"),
+            ]),
+        );
+        assert_eq!(
+            headers,
+            vec![
+                pair("cf-access-client-id", "from-cli"),
+                pair("CF-Access-Client-Secret", "secret"),
+            ]
+        );
+        assert_eq!(from_env, vec!["CF-Access-Client-Secret"]);
     }
 
     #[test]

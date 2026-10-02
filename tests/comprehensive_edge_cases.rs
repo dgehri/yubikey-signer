@@ -287,7 +287,7 @@ mod signature_format_tests {
             match result {
                 Ok(signature) => {
                     println!("  Success: {} byte signature", signature.len());
-                    assert!(!signature.is_empty());
+                    assert!(!signature.is_empty(), "signature is empty");
                 }
                 Err(e) => {
                     println!("  Failed: {e}");
@@ -361,7 +361,7 @@ mod signature_format_tests {
             match result {
                 Ok(signature) => {
                     println!("  Handled gracefully: {} bytes", signature.len());
-                    assert!(!signature.is_empty());
+                    assert!(!signature.is_empty(), "signature is empty");
                 }
                 Err(e) => {
                     println!("  Failed (expected): {e}");

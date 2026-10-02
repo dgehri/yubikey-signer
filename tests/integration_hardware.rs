@@ -107,7 +107,10 @@ async fn test_yubikey_certificate_matches_file() {
             println!("Certificate subject: {:?}", cert.tbs_certificate.subject);
 
             // Verify it's a valid certificate structure
-            assert!(!cert.tbs_certificate.serial_number.as_bytes().is_empty());
+            assert!(
+                !cert.tbs_certificate.serial_number.as_bytes().is_empty(),
+                "certificate serial number is empty"
+            );
         }
         Err(e) => {
             // No certificate in 0x9a, try other slots
@@ -125,7 +128,10 @@ async fn test_yubikey_certificate_matches_file() {
                             "SUCCESS: Retrieved certificate from YubiKey slot 0x{slot_id:02x}"
                         );
                         println!("Certificate subject: {:?}", cert.tbs_certificate.subject);
-                        assert!(!cert.tbs_certificate.serial_number.as_bytes().is_empty());
+                        assert!(
+                            !cert.tbs_certificate.serial_number.as_bytes().is_empty(),
+                            "certificate serial number is empty"
+                        );
                         found_cert = true;
                         break;
                     }
